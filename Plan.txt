@@ -1,0 +1,23 @@
+backend/
+├── server.js               # Point d'entrée du serveur Express
+├── package.json
+├── .env                    # Variables d'environnement (MongoDB URI, JWT_SECRET, etc.)
+├── config/
+│   └── db.js               # Connexion MongoDB
+├── models/
+│   ├── Admin.js
+│   ├── Mission.js
+│   └── Volunteer.js
+├── routes/
+│   ├── admin.js
+│   ├── mission.js
+│   └── volunteer.js
+├── controllers/
+│   ├── adminController.js
+│   ├── missionController.js
+│   └── volunteerController.js
+├── middlewares/
+│   ├── auth.js             # Middleware pour vérifier JWT et rôles
+│   └── errorHandler.js     # Gestion centralisée des erreurs
+└── utils/
+    ├── generateJwt.js
