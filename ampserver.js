@@ -20,9 +20,20 @@ const app = express();
 app.use(express.json());
 
 // Autoriser les requêtes depuis ton frontend local
+const allowedOrigins = [
+  "http://localhost:4321",         // 🔹 ton frontend local
+  "https://ampbenin.netlify.app"  // 🔹 ton frontend déployé (Render)
+];
+
 app.use(cors({
-  origin: "http://localhost:4321", // 🔹 Adresse de ton frontend
-  methods: ["GET","POST","PUT","DELETE"],
+  origin: function (origin, callback) {
+    if (!origin || allowedOrigins.includes(origin)) {
+      callback(null, true);
+    } else {
+      callback(new Error("Not allowed by CORS"));
+    }
+  },
+  methods: "*",
   credentials: true
 }));
 
@@ -32,6 +43,17 @@ app.use("/api/volunteers", volunteerRoutes);
 app.use("/api/missions", missionRoutes);
 app.use("/api/admin", adminRoutes);
 app.use("/api/certificates", certificateRoutes); // ← route certificats
+
+// ✅ Route racine
+app.get("/", (req, res) => {
+  res.send("🚀 Backend AMP Benin déployé avec succès sur Koyeb !");
+});
+
+// ✅ Health check
+app.get("/ampserver", (req, res) => {
+  res.json({ status: "ok", message: "Votre back-end AMP BENIN - GESTION DES MISSIONS DES VOLONTAIRES et les API fonctionnent bien 🚀" });
+});
+
 
 // Middleware d’erreurs
 app.use(errorHandler);
