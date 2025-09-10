@@ -1,12 +1,7 @@
+// models/volunteer.js
+
 const mongoose = require("mongoose");
 
-/**
- * Modèle des volontaires, lié à une Mission.
- * - Nom et Prénom séparés
- * - fullName généré automatiquement
- * - statut pour le workflow d'attestation
- * - attestations pour stockage Cloudinary
- */
 const VolunteerSchema = new mongoose.Schema(
   {
     nom: { type: String, required: true, trim: true },
@@ -48,6 +43,20 @@ VolunteerSchema.pre("save", function (next) {
   this.fullName = `${this.nom} ${this.prenom}`;
   next();
 });
+
+// Recalcule fullName sur findOneAndUpdate
+VolunteerSchema.pre("findOneAndUpdate", async function (next) {
+  const update = this.getUpdate() || {};
+  if (update.nom || update.prenom) {
+    const doc = await this.model.findOne(this.getQuery()).select("nom prenom");
+    const newNom = update.nom ?? doc.nom;
+    const newPrenom = update.prenom ?? doc.prenom;
+    update.fullName = `${newNom} ${newPrenom}`.trim();
+    this.setUpdate(update);
+  }
+  next();
+});
+
 
 // Empêche les doublons email+mission
 VolunteerSchema.index({ email: 1, mission: 1 }, { unique: true });

@@ -46,7 +46,7 @@ app.use("/api/certificates", certificateRoutes); // ← route certificats
 
 // ✅ Route racine
 app.get("/", (req, res) => {
-  res.send("🚀 Backend AMP Benin déployé avec succès sur Koyeb !");
+  res.send("🚀 Backend AMP Benin déployé avec succès en ligne !");
 });
 
 // ✅ Health check

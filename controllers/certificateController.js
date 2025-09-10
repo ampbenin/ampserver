@@ -109,20 +109,64 @@ const generateCertificate = async (req, res) => {
       const ctx = canvas.getContext("2d");
       ctx.drawImage(templateImage, 0, 0);
 
-      // 3️⃣ Écrire Nom + Prénom
-      ctx.fillStyle = "#0b0350ff";
-      ctx.font = "60px Arial";
-      ctx.textAlign = "center";
-      ctx.textBaseline = "middle";
-      ctx.fillText(`${volunteer.nom} ${volunteer.prenom}`, 500, 320);
+      // 3️⃣ Écrire Nom + Prénom (ajusté automatiquement à la zone dédiée)
+const rectName = { x1: 329, y1: 619, x2: 1639, y2: 723 };
+
+// Dimensions et centre de la zone
+const rectNameWidth = rectName.x2 - rectName.x1;   // 1310 px
+const rectNameHeight = rectName.y2 - rectName.y1;  // 104 px
+const textNameX = rectName.x1 + rectNameWidth / 2;
+const textNameY = rectName.y1 + rectNameHeight / 2;
+
+// Fonction pour adapter la taille du texte
+function fitNameText(ctx, text, maxWidth, maxHeight, fontFamily, initialSize) {
+  let fontSize = initialSize;
+  do {
+    ctx.font = `bold ${fontSize}px ${fontFamily}`;
+    const metrics = ctx.measureText(text);
+    const textHeight = metrics.actualBoundingBoxAscent + metrics.actualBoundingBoxDescent;
+    if (metrics.width <= maxWidth && textHeight <= maxHeight) break;
+    fontSize--;
+  } while (fontSize > 10); // sécurité : minimum 10px
+  return ctx.font;
+}
+
+// Application
+ctx.fillStyle = "#190d86ff";
+ctx.textAlign = "center";
+ctx.textBaseline = "middle";
+ctx.font = fitNameText(ctx, `${volunteer.nom} ${volunteer.prenom}`, rectNameWidth, rectNameHeight, "'Trebuchet MS', serif", 70);
+
+// Dessin du texte centré
+ctx.fillText(`${volunteer.nom} ${volunteer.prenom}`, textNameX, textNameY);
+
 
       // 4️⃣ Générer QR Code avec lien vers le frontend
-      const frontendBaseUrl = "https://ampbenin.netlify.app/verify";
-      const attestationId = attestation._id.toString();
-      const qrData = `${frontendBaseUrl}/${attestationId}`;
-      const qrBuffer = await QRCode.toBuffer(qrData, { width: 115 });
-      const qrImage = await loadImage(qrBuffer);
-      ctx.drawImage(qrImage, 85, 524, 115, 115);
+
+// 🔹 Coordonnées du rectangle (issues de image-map.net)
+const rect = { x1: 193, y1: 1269, x2: 404, y2: 1052 };
+
+// Dimensions du rectangle
+const rectWidth = rect.x2 - rect.x1;   // 211 px
+const rectHeight = rect.y1 - rect.y2;  // 217 px
+
+// Taille du QR code (un peu plus petit que le rectangle pour laisser de la marge)
+const qrSize = Math.min(rectWidth, rectHeight) - 10; // ex: 201 px
+
+// Position (centrée dans le rectangle)
+const qrX = rect.x1 + (rectWidth - qrSize) / 2;
+const qrY = rect.y2 + (rectHeight - qrSize) / 2;
+
+// 🔹 Génération du QR code
+const frontendBaseUrl = "https://ampbenin.netlify.app/verify";
+const attestationId = attestation._id.toString();
+const qrData = `${frontendBaseUrl}/${attestationId}`;
+
+const qrBuffer = await QRCode.toBuffer(qrData, { width: qrSize });
+const qrImage = await loadImage(qrBuffer);
+
+// Dessiner le QR Code bien centré dans la zone
+ctx.drawImage(qrImage, qrX, qrY, qrSize, qrSize);
 
       // 5️⃣ Générer PDF paysage depuis le canvas
       const pdfDoc = await PDFDocument.create();
@@ -220,7 +264,7 @@ const downloadCertificate = async (req, res) => {
     // Vérification du statut du volontaire
     if (volunteer.statut === "Non disponible") {
       return res.status(403).json({
-        message: "Votre attestation n'est pas encore disponible",
+        message: "Vous n'avez pas renseigner le raport de fin de mission ou vous n'y avez point participer",
       });
     }
 
