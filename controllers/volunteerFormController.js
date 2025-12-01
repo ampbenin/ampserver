@@ -1,5 +1,5 @@
 const mongoose = require("mongoose");
-const VolunteerForm = require("../models/VolunteerForm");
+const VolunteerForm = require("../models/volunteerForm");
 
 // Connexion à la base MONGODB_URI_FORM
 const connectFormDB = async () => {
