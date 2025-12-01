@@ -6,6 +6,11 @@ const volunteerRoutes = require("./routes/volunteerRoute");
 const missionRoutes = require("./routes/missionRoute");
 const adminRoutes = require("./routes/adminRoute");
 const certificateRoutes = require("./routes/certificateRoute"); // ← ajouter
+const newsletterRoutes = require("./routes/newsletterRoute");
+const contactRoutes = require("./routes/contactRoute");
+const volunteerFormRoutes = require("./routes/volunteerFormRoute");
+const partnerRoutes = require("./routes/partnerRoute");
+const memberRoutes = require("./routes/memberRoute");
 const { errorHandler } = require("./middlewares/errorHandler");
 
 // Charger les variables d'environnement
@@ -43,6 +48,11 @@ app.use("/api/volunteers", volunteerRoutes);
 app.use("/api/missions", missionRoutes);
 app.use("/api/admin", adminRoutes);
 app.use("/api/certificates", certificateRoutes); // ← route certificats
+app.use("/api/newsletter", newsletterRoutes);
+app.use("/api/contact", contactRoutes);
+app.use("/api/volunteer-form", volunteerFormRoutes);
+app.use("/api/partner-form", partnerRoutes);
+app.use("/api/members", memberRoutes);
 
 // ✅ Route racine
 app.get("/", (req, res) => {

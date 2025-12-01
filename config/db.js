@@ -3,13 +3,29 @@ const mongoose = require("mongoose");
 
 const connectDB = async () => {
   try {
-    const conn = await mongoose.connect(process.env.MONGODB_URI, {
-      useNewUrlParser: true,
-      useUnifiedTopology: true,
-    });
-    console.log(`✅ MongoDB connecté - 2ème Base de données - Mission volontaire: ${conn.connection.host}`);
+    // 🔵 Connexion 1 : Base principale
+    const mainConn = await mongoose.connect(process.env.MONGODB_URI);
+    console.log(`✅ MongoDB connecté - BASE PRINCIPALE : ${mainConn.connection.host}`);
+
+    // 🔵 Connexion 2 : Base formulaire
+    if (process.env.MONGODB_URI_FORM) {
+      const formConn = mongoose.createConnection(process.env.MONGODB_URI_FORM);
+
+      formConn.on("connected", () => {
+        console.log(`📄 MongoDB connecté - BASE FORMULAIRES : ${process.env.MONGODB_URI_FORM}`);
+      });
+
+      formConn.on("error", (err) => {
+        console.error("❌ Erreur MongoDB - BASE FORMULAIRES :", err.message);
+      });
+
+      global.formDB = formConn;
+    } else {
+      console.log("⚠️ MONGODB_URI_FORM non défini dans .env");
+    }
+
   } catch (error) {
-    console.error(`❌ Erreur MongoDB - 2ème Base de données - Mission volontaire : ${error.message}`);
+    console.error(`❌ Erreur MongoDB : ${error.message}`);
     process.exit(1);
   }
 };
