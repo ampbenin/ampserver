@@ -1,54 +1,133 @@
 // controllers/volunteerController.js
 
+const mongoose = require("mongoose");
 const Volunteer = require("../models/volunteer");
 const Mission = require("../models/mission");
 
-// ➕ Créer un volontaire
-const createVolunteer = async (req, res, next) => {
+/* ---------------------- Créer ou mettre à jour un volontaire ---------------------- */
+const createOrUpdateVolunteer = async (req, res, next) => {
   try {
-    const { titre, nom, prenom, email, telephone, statut } = req.body;
+    const { nom, prenom, email, telephone, statut, missions = [] } = req.body;
 
-    // 🔹 Trouver la mission par son titre
-    const mission = await Mission.findOne({ titre });
-    if (!mission) {
-      return res.status(404).json({ success: false, message: "Mission non trouvée" });
+    if (!email) return res.status(400).json({ message: "Email requis" });
+
+    // 🔹 Chercher un volontaire existant par email
+    let volunteer = await Volunteer.findOne({ email });
+
+    // 🔹 Préparer les missions avec statut
+    const missionEntries = [];
+    for (const m of missions) {
+      const mission = await Mission.findById(m.missionId);
+      if (mission) {
+        missionEntries.push({
+          missionId: mission._id,
+          statut: m.statut || "Non disponible",
+        });
+      }
     }
 
-    // 🔹 Créer le volontaire avec l'ObjectId déjà présent
-    const volunteer = await Volunteer.create({
-      nom,
-      prenom,
-      email,
-      telephone,
-      statut,
-      mission: mission._id,
-    });
+    if (!volunteer) {
+      // 🔹 Créer un nouveau volontaire
+      volunteer = await Volunteer.create({
+        nom,
+        prenom,
+        email,
+        telephone,
+        statut,
+        missions: missionEntries,
+      });
 
-    res.status(201).json({ success: true, message: "Volontaire ajouté avec succès", volunteer });
+      const populated = await Volunteer.findById(volunteer._id).populate(
+        "missions.missionId",
+        "titre"
+      );
+
+      return res.status(201).json({
+        success: true,
+        message: "Volontaire créé avec succès",
+        volunteer: populated,
+      });
+    }
+
+    // 🔹 Si le volontaire existe, mettre à jour les informations
+    volunteer.nom = nom ?? volunteer.nom;
+    volunteer.prenom = prenom ?? volunteer.prenom;
+    volunteer.telephone = telephone ?? volunteer.telephone;
+    volunteer.statut = statut ?? volunteer.statut;
+
+    // 🔹 Ajouter ou mettre à jour les missions
+    for (const m of missionEntries) {
+      const existing = volunteer.missions.find(
+        (vm) => vm.missionId.toString() === m.missionId.toString()
+      );
+      if (existing) {
+        // Mettre à jour le statut si déjà existant
+        existing.statut = m.statut;
+      } else {
+        // Ajouter nouvelle mission
+        volunteer.missions.push(m);
+      }
+    }
+
+    await volunteer.save();
+
+    const populated = await Volunteer.findById(volunteer._id).populate(
+      "missions.missionId",
+      "titre"
+    );
+
+    res.json({
+      success: true,
+      message: "Volontaire mis à jour avec les missions",
+      volunteer: populated,
+    });
   } catch (error) {
     if (error.code === 11000) {
-      return res.status(400).json({ message: "Ce volontaire existe déjà pour cette mission." });
+      return res
+        .status(400)
+        .json({ message: "Ce volontaire existe déjà pour cette mission." });
     }
     next(error);
   }
 };
 
-// 📥 Récupérer les volontaires pour une mission donnée
+/* ---------------------- Autocomplete email volontaire ---------------------- */
+const searchVolunteerByEmail = async (req, res, next) => {
+  try {
+    const { q } = req.query;
+
+    if (!q || q.length < 2) {
+      return res.json({ success: true, items: [] });
+    }
+
+    const regex = new RegExp(q, "i");
+
+    const volunteers = await Volunteer.find({ email: regex })
+      .select("email nom prenom telephone statut")
+      .limit(5);
+
+    res.json({ success: true, items: volunteers });
+  } catch (error) {
+    next(error);
+  }
+};
+
+
+/* ---------------------- Récupérer les volontaires pour certificat ---------------------- */
 const fetchVolunteersForCertificate = async (req, res, next) => {
   try {
     const { titre, email } = req.body;
 
-    // 🔹 Récupérer l'ID mission depuis son titre
     const mission = await Mission.findOne({ titre });
     if (!mission) {
       return res.status(404).json({ success: false, message: "Mission non trouvée" });
     }
 
-    // ✅ Mission._id est déjà un ObjectId, pas besoin de mongoose.Types.ObjectId()
-    const filter = { mission: mission._id, statut: "Mission validée" };
-    if (email) filter.email = email;
-
-    const volunteers = await Volunteer.find(filter);
+    const volunteers = await Volunteer.find({
+      "missions.missionId": mission._id,
+      "missions.statut": "Mission validée",
+      ...(email && { email }),
+    }).populate("missions.missionId", "titre");
 
     res.json({ success: true, volunteers });
   } catch (error) {
@@ -56,16 +135,10 @@ const fetchVolunteersForCertificate = async (req, res, next) => {
   }
 };
 
-
-
-/* ---------------------- contrôleurs CRUD VolunteersManager ---------------------- */
-
-/* 🔎 Lister + rechercher + filtrer (sans pagination)
-   GET /api/volunteers?search=&statut=&missionId=&missionTitre */
+/* ---------------------- Lister les volontaires ---------------------- */
 const listVolunteers = async (req, res, next) => {
   try {
     const { search = "", statut, missionId, missionTitre, sort = "-createdAt" } = req.query;
-
     const q = {};
 
     if (search) {
@@ -76,33 +149,24 @@ const listVolunteers = async (req, res, next) => {
     if (statut) q.statut = statut;
 
     if (missionId && mongoose.isValidObjectId(missionId)) {
-      q.mission = missionId;
+      q["missions.missionId"] = missionId;
     } else if (missionTitre) {
       const m = await Mission.findOne({ titre: missionTitre }).select("_id");
-      if (m) q.mission = m._id;
-      else q.mission = null;
+      if (m) q["missions.missionId"] = m._id;
     }
 
-    const items = await Volunteer.find(q)
-      .populate("mission", "titre")
-      .sort(sort);
+    const items = await Volunteer.find(q).populate("missions.missionId", "titre").sort(sort);
 
-    res.json({
-      success: true,
-      total: items.length,
-      items,
-    });
+    res.json({ success: true, total: items.length, items });
   } catch (error) {
     next(error);
   }
 };
 
-
-/* 📄 Détail d’un volontaire
-   GET /api/volunteers/:id */
+/* ---------------------- Détail d’un volontaire ---------------------- */
 const getVolunteerById = async (req, res, next) => {
   try {
-    const v = await Volunteer.findById(req.params.id).populate("mission", "titre");
+    const v = await Volunteer.findById(req.params.id).populate("missions.missionId", "titre");
     if (!v) return res.status(404).json({ message: "Volontaire non trouvé" });
     res.json({ success: true, volunteer: v });
   } catch (error) {
@@ -110,54 +174,7 @@ const getVolunteerById = async (req, res, next) => {
   }
 };
 
-/* ✏️ Mettre à jour un volontaire
-   PUT /api/volunteers/:id */
-const updateVolunteer = async (req, res, next) => {
-  try {
-    const { nom, prenom, email, telephone, statut, missionId, missionTitre } = req.body;
-
-    let mission;
-    if (missionId && mongoose.isValidObjectId(missionId)) {
-      mission = await Mission.findById(missionId);
-      if (!mission) return res.status(404).json({ message: "Mission non trouvée" });
-    } else if (missionTitre) {
-      mission = await Mission.findOne({ titre: missionTitre });
-      if (!mission) return res.status(404).json({ message: "Mission non trouvée" });
-    }
-
-    const updates = {};
-    if (typeof nom === "string") updates.nom = nom.trim();
-    if (typeof prenom === "string") updates.prenom = prenom.trim();
-    if (typeof email === "string") updates.email = email.trim();
-    if (typeof telephone === "string") updates.telephone = telephone.trim();
-    if (typeof statut === "string") updates.statut = statut;
-    if (mission) updates.mission = mission._id;
-
-    if ("nom" in updates || "prenom" in updates) {
-      const current = await Volunteer.findById(req.params.id).select("nom prenom");
-      if (!current) return res.status(404).json({ message: "Volontaire non trouvé" });
-      const newNom = updates.nom ?? current.nom;
-      const newPrenom = updates.prenom ?? current.prenom;
-      updates.fullName = `${newNom} ${newPrenom}`.trim();
-    }
-
-    const updated = await Volunteer.findByIdAndUpdate(req.params.id, updates, {
-      new: true,
-      runValidators: true,
-    }).populate("mission", "titre");
-
-    if (!updated) return res.status(404).json({ message: "Volontaire non trouvé" });
-    res.json({ success: true, volunteer: updated });
-  } catch (error) {
-    if (error.code === 11000) {
-      return res.status(400).json({ message: "Ce volontaire existe déjà pour cette mission." });
-    }
-    next(error);
-  }
-};
-
-/* 🗑️ Supprimer un volontaire
-   DELETE /api/volunteers/:id */
+/* ---------------------- Supprimer un volontaire ---------------------- */
 const deleteVolunteer = async (req, res, next) => {
   try {
     const deleted = await Volunteer.findByIdAndDelete(req.params.id);
@@ -168,46 +185,42 @@ const deleteVolunteer = async (req, res, next) => {
   }
 };
 
-/* 🎯 Attribuer / ré-attribuer une mission
-   POST /api/volunteers/:id/assign-mission
-   Body: { missionId?, missionTitre? } */
-const assignVolunteerMission = async (req, res, next) => {
+/* ---------------------- Attribuer des missions supplémentaires ---------------------- */
+const assignVolunteerMissions = async (req, res, next) => {
   try {
-    const { missionId, missionTitre } = req.body;
-
-    let mission;
-    if (missionId && mongoose.isValidObjectId(missionId)) {
-      mission = await Mission.findById(missionId);
-    } else if (missionTitre) {
-      mission = await Mission.findOne({ titre: missionTitre });
-    }
-    if (!mission) return res.status(404).json({ message: "Mission non trouvée" });
-
+    const { missions = [] } = req.body;
     const volunteer = await Volunteer.findById(req.params.id);
     if (!volunteer) return res.status(404).json({ message: "Volontaire non trouvé" });
 
-    // Vérifie si la mission est déjà attribuée
-    if (volunteer.mission && volunteer.mission.toString() === mission._id.toString()) {
-      return res.status(400).json({ message: "Ce volontaire dispose déjà de cette mission." });
+    const newMissionIds = [];
+    for (const titre of missions) {
+      const mission = await Mission.findOne({ titre });
+      if (mission && !volunteer.missions.find((m) => m.missionId.toString() === mission._id.toString())) {
+        newMissionIds.push({ missionId: mission._id });
+      }
     }
 
-    volunteer.mission = mission._id;
+    if (newMissionIds.length === 0) {
+      return res.status(400).json({ message: "Aucune nouvelle mission à attribuer" });
+    }
+
+    volunteer.missions = [...volunteer.missions, ...newMissionIds];
     await volunteer.save();
 
-    const populated = await Volunteer.findById(volunteer._id).populate("mission", "titre");
-    res.json({ success: true, volunteer: populated, message: "Mission attribuée" });
+    const populated = await Volunteer.findById(volunteer._id).populate("missions.missionId", "titre");
+
+    res.json({ success: true, volunteer: populated, message: "Missions attribuées" });
   } catch (error) {
     next(error);
   }
 };
 
-
 module.exports = {
-  createVolunteer,
+  createOrUpdateVolunteer,
   fetchVolunteersForCertificate,
+  searchVolunteerByEmail,
   listVolunteers,
   getVolunteerById,
-  updateVolunteer,
   deleteVolunteer,
-  assignVolunteerMission,
+  assignVolunteerMissions,
 };

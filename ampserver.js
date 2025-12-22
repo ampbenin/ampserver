@@ -13,6 +13,7 @@ const partnerRoutes = require("./routes/partnerRoute");
 const memberRoutes = require("./routes/memberRoute");
 const { errorHandler } = require("./middlewares/errorHandler");
 
+
 // Charger les variables d'environnement
 dotenv.config();
 
@@ -48,6 +49,13 @@ app.use("/api/volunteer-form", volunteerFormRoutes);
 app.use("/api/partner-form", partnerRoutes);
 app.use("/api/members", memberRoutes);
 
+// routes admin
+app.use('/admin/newsletters', require('./routes/admin/newsletter'));
+app.use('/admin/contacts', require('./routes/admin/contact'));
+app.use('/admin/members', require('./routes/admin/members'));
+app.use('/admin/partners', require('./routes/admin/partners'));
+app.use('/admin/volunteers', require('./routes/admin/volunteers'));
+
 // ✅ Route racine
 app.get("/", (req, res) => {
   res.send("🚀 Backend AMP Benin déployé avec succès en ligne !");
@@ -63,7 +71,7 @@ app.get("/ampserver", (req, res) => {
 app.use(errorHandler);
 
 // Démarrage du serveur
-const PORT = process.env.PORT || 8000;
+const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
   console.log(`🚀 Serveur en cours sur le port ${PORT}`);
 });

@@ -1,26 +1,36 @@
-// routes/volunteerRoute
+// routes/volunteerRoute.js
 
 const express = require("express");
 const {
-  createVolunteer,
+  createOrUpdateVolunteer,
   fetchVolunteersForCertificate,
-    // 🔽 VolunteersManager
+  searchVolunteerByEmail,
   listVolunteers,
   getVolunteerById,
-  updateVolunteer,
   deleteVolunteer,
-  assignVolunteerMission,
+  assignVolunteerMissions,
 } = require("../controllers/volunteerController");
 
 const router = express.Router();
 
-router.post("/", createVolunteer);
-router.post("/certificates", fetchVolunteersForCertificate);
-router.get("/", listVolunteers);                     // GET /api/volunteers?search=...&statut=...&missionId=...&missionTitre=...
-router.get("/:id", getVolunteerById);               // GET /api/volunteers/:id
-router.put("/:id", updateVolunteer);                // PUT /api/volunteers/:id
-router.delete("/:id", deleteVolunteer);             // DELETE /api/volunteers/:id
-router.post("/:id/assign-mission", assignVolunteerMission);  // POST /api/volunteers/:id/assign-mission
+// ➕ Créer ou mettre à jour un volontaire
+router.post("/", createOrUpdateVolunteer);
 
+// 📥 Récupérer les volontaires pour certificat
+router.post("/certificates", fetchVolunteersForCertificate);
+
+router.post("/",   searchVolunteerByEmail);
+
+// 🔎 Lister les volontaires avec recherche et filtrage
+router.get("/", listVolunteers);
+
+// 📄 Détail d’un volontaire
+router.get("/:id", getVolunteerById);
+
+// ✏️ Supprimer un volontaire
+router.delete("/:id", deleteVolunteer);
+
+// 🎯 Attribuer des missions supplémentaires
+router.post("/:id/assign-missions", assignVolunteerMissions);
 
 module.exports = router;

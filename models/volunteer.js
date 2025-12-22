@@ -17,15 +17,26 @@ const VolunteerSchema = new mongoose.Schema(
       default: "Non disponible",
     },
 
-    mission: { type: mongoose.Schema.Types.ObjectId, ref: "Mission", required: true },
+    // ✅ Tableau des missions pour gérer plusieurs missions
+    missions: [
+      {
+        missionId: { type: mongoose.Schema.Types.ObjectId, ref: "Mission", required: true },
+        statut: {
+          type: String,
+          enum: ["Non disponible", "Refusé", "Mission validée"],
+          default: "Non disponible",
+        },
+        assignedAt: { type: Date, default: Date.now },
+      },
+    ],
 
     // ✅ Stockage cloud des attestations
     attestations: [
       {
         missionId: { type: mongoose.Schema.Types.ObjectId, ref: "Mission", required: true },
-        missionName: { type: String },          // Nom de la mission pour le frontend
-        fileName: { type: String },             // nom original du fichier
-        fileUrl: { type: String },              // lien vers le fichier stocké dans le cloud
+        missionName: { type: String },
+        fileName: { type: String },
+        fileUrl: { type: String },
         statut: {
           type: String,
           enum: ["Non disponible", "Refusé", "Mission validée"],
@@ -57,8 +68,7 @@ VolunteerSchema.pre("findOneAndUpdate", async function (next) {
   next();
 });
 
-
-// Empêche les doublons email+mission
-VolunteerSchema.index({ email: 1, mission: 1 }, { unique: true });
+// 🔹 Index unique sur email uniquement (un volontaire par email)
+VolunteerSchema.index({ email: 1 }, { unique: true });
 
 module.exports = mongoose.models.Volunteer || mongoose.model("Volunteer", VolunteerSchema);
