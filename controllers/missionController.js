@@ -1,4 +1,5 @@
 const Mission = require("../models/mission");
+const Volunteer = require("../models/volunteer");
 
 // Créer une mission
 const createMission = async (req, res, next) => {
@@ -43,16 +44,30 @@ const updateMission = async (req, res, next) => {
   }
 };
 
+
 // Supprimer une mission
 const deleteMission = async (req, res, next) => {
   try {
-    const mission = await Mission.findByIdAndDelete(req.params.id);
+    const missionId = req.params.id;
+
+    // 1️⃣ Supprimer la mission de la collection Mission
+    const mission = await Mission.findByIdAndDelete(missionId);
     if (!mission) return res.status(404).json({ message: "Mission non trouvée" });
+
+    // 2️⃣ Retirer toutes les références à cette mission dans les volontaires
+    await Volunteer.updateMany(
+      { "missions.missionId": missionId },
+      { $pull: { missions: { missionId: missionId } } }
+    );
+
+    // 3️⃣ Réponse succès
     res.status(200).json({ message: "Mission supprimée avec succès" });
   } catch (error) {
+    console.error("❌ deleteMission error:", error);
     next(error);
   }
 };
+
 
 // Trouver une mission par son titre
 const findMissionByTitle = async (req, res, next) => {
