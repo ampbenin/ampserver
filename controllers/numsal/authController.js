@@ -15,7 +15,7 @@ const crypto = require("crypto");
 const Sentry = require("@sentry/node");
 const getNumsalUserModel = require("../../models/numsal/NumsalUser");
 const jwtConfig = require("../../config/jwt");
-const transporter = require("../../utils/mailer");
+const resend = require("../../utils/resendMailer");
 
 const generateToken = (user) => {
   return jwt.sign(
@@ -178,8 +178,8 @@ exports.forgotPassword = async (req, res) => {
     const resetUrl = `${frontendBase}/reset-password?token=${rawToken}&email=${encodeURIComponent(email)}`;
 
     try {
-      await transporter.sendMail({
-        from: process.env.MAIL_FROM || process.env.SMTP_USER,
+      await resend.emails.send({
+        from: process.env.RESEND_FROM_EMAIL || "NumSAL <onboarding@resend.dev>",
         to: email,
         subject: "Réinitialisation de votre mot de passe — NumSAL",
         text: `Bonjour ${user.name},\n\nVous avez demandé la réinitialisation de votre mot de passe NumSAL.\nCliquez sur ce lien (valable 1 heure) pour choisir un nouveau mot de passe :\n${resetUrl}\n\nSi vous n'êtes pas à l'origine de cette demande, ignorez cet email.`,

@@ -1,5 +1,5 @@
 // controllers/admin/newsletterController.js
-const transporter = require('../../utils/mailer');
+const resend = require('../../utils/resendMailer');
 const getNewsletterModel = require('../../models/Newsletter');
 
 /**
@@ -52,13 +52,14 @@ exports.sendMail = async (req, res) => {
       return res.status(400).json({ error: 'Aucun destinataire' });
     }
 
-    // Envoi batch
-    const batchSize = 80;
+    // Envoi batch — 50 destinataires max par appel (limite Resend), contre
+    // 80 auparavant avec le SMTP historique.
+    const batchSize = 50;
     for (let i = 0; i < recipients.length; i += batchSize) {
       const batch = recipients.slice(i, i + batchSize);
-      await transporter.sendMail({
-        from: process.env.MAIL_FROM || process.env.SMTP_USER,
-        to: batch.join(','),
+      await resend.emails.send({
+        from: process.env.RESEND_FROM_EMAIL || 'AMP BENIN <onboarding@resend.dev>',
+        to: batch,
         subject: subject || 'Newsletter',
         text: text || '',
         html: html || undefined,

@@ -1,9 +1,8 @@
 /**
- * Client Resend — utilisé uniquement pour le mail de réception de
- * candidature NumSAL (courseController.applyToCourse). Les autres emails
- * du site (admission NumSAL, mot de passe oublié, newsletter) restent sur
- * le transporteur SMTP existant (utils/mailer.js) — pas de migration
- * globale demandée pour l'instant.
+ * Client Resend — transporteur email unique du site (candidature/admission
+ * NumSAL, mot de passe oublié gestionamp et NumSAL, newsletter). Remplace
+ * l'ancien transporteur SMTP/nodemailer (utils/mailer.js, supprimé) pour
+ * éviter d'avoir à configurer un compte SMTP séparé en plus de Resend.
  */
 const { Resend } = require("resend");
 

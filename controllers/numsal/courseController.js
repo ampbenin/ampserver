@@ -10,7 +10,6 @@ const getNumsalCourseModel = require("../../models/numsal/NumsalCourse");
 const getNumsalEnrollmentModel = require("../../models/numsal/NumsalEnrollment");
 const getNumsalApplicationModel = require("../../models/numsal/NumsalApplication");
 const getNumsalUserModel = require("../../models/numsal/NumsalUser");
-const transporter = require("../../utils/mailer");
 const resend = require("../../utils/resendMailer");
 const { renderNumsalEmail, renderContactBlockText, escapeHtml } = require("../../utils/emailTemplates");
 
@@ -661,8 +660,8 @@ exports.acceptApplication = async (req, res, next) => {
     const modalityLabel = MODALITY_LABELS[course.modality] || course.modality;
 
     try {
-      await transporter.sendMail({
-        from: process.env.MAIL_FROM || process.env.SMTP_USER,
+      await resend.emails.send({
+        from: process.env.RESEND_FROM_EMAIL || "NumSAL <onboarding@resend.dev>",
         to: application.applicantEmail,
         subject: `Admission au programme "${course.title}" — NumSAL`,
         text: [

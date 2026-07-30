@@ -9,7 +9,7 @@ const jwt = require("jsonwebtoken");
 const crypto = require("crypto");
 const getUserModel = require("../../models/gestionamp/User");
 const jwtConfig = require("../../config/jwt");
-const transporter = require("../../utils/mailer");
+const resend = require("../../utils/resendMailer");
 
 /**
  * Génération du token JWT.
@@ -137,8 +137,8 @@ exports.forgotPassword = async (req, res) => {
     const resetUrl = `${frontendBase}/reset-password?token=${rawToken}&email=${encodeURIComponent(email)}`;
 
     try {
-      await transporter.sendMail({
-        from: process.env.MAIL_FROM || process.env.SMTP_USER,
+      await resend.emails.send({
+        from: process.env.RESEND_FROM_EMAIL || "AMP BENIN <onboarding@resend.dev>",
         to: email,
         subject: "Réinitialisation de votre mot de passe — AMP BENIN",
         text: `Bonjour ${user.name},\n\nVous avez demandé la réinitialisation de votre mot de passe.\nCliquez sur ce lien (valable 1 heure) pour choisir un nouveau mot de passe :\n${resetUrl}\n\nSi vous n'êtes pas à l'origine de cette demande, ignorez cet email.`,
