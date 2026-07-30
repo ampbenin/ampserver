@@ -234,6 +234,27 @@ exports.listPublicCourses = async (req, res, next) => {
   }
 };
 
+/* -------------------- Public : quelques chiffres agrégés pour la page d'accueil -------------------- */
+/* Uniquement des compteurs, rien de sensible — pas d'auth nécessaire. */
+exports.getPublicStats = async (req, res, next) => {
+  try {
+    const Course = getNumsalCourseModel();
+    const NumsalUser = getNumsalUserModel();
+    const Enrollment = getNumsalEnrollmentModel();
+
+    const [learners, trainers, publishedCourses, enrollments] = await Promise.all([
+      NumsalUser.countDocuments({ role: "APPRENANT" }),
+      NumsalUser.countDocuments({ role: "FORMATEUR" }),
+      Course.countDocuments({ status: "PUBLISHED" }),
+      Enrollment.countDocuments(),
+    ]);
+
+    res.json({ learners, trainers, publishedCourses, enrollments });
+  } catch (error) {
+    next(error);
+  }
+};
+
 /* -------------------- Authentifié : détail complet d'un cours -------------------- */
 /* Réservé au formateur propriétaire, à l'ADMIN, ou à un apprenant inscrit. */
 exports.getCourseById = async (req, res, next) => {

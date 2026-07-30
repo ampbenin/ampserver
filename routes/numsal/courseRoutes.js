@@ -18,6 +18,9 @@ router.get("/", ctrl.listPublicCourses);
 router.get("/:id/application-form", ctrl.getApplicationForm);
 router.post("/:id/apply", authLimiter, ctrl.applyToCourse);
 
+// 🌐 Public — quelques chiffres agrégés pour la page d'accueil marketing
+router.get("/stats/public", ctrl.getPublicStats);
+
 // 🔐 Formateur — mes cours (déclaré avant "/:id" pour ne pas être capté par le paramètre générique)
 router.get("/mine", ...requireFormateur, ctrl.listMyCourses);
 router.post("/", ...requireFormateurOrAdmin, ctrl.createCourse);
