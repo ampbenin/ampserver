@@ -7,8 +7,12 @@ const {
   deleteMission,
   findMissionByTitle,
 } = require("../controllers/missionController");
+const authMiddleware = require("../middlewares/gestionamp/authMiddleware");
+const roleMiddleware = require("../middlewares/gestionamp/roleMiddleware");
 
 const router = express.Router();
+
+router.use(authMiddleware, roleMiddleware("ADMIN", "EDITOR"));
 
 router.post("/", createMission);
 router.get("/", getMissions);

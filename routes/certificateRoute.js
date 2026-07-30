@@ -6,17 +6,19 @@ const {
   downloadCertificate,
   verifyAttestation,
 } = require("../controllers/certificateController");
+const authMiddleware = require("../middlewares/gestionamp/authMiddleware");
+const roleMiddleware = require("../middlewares/gestionamp/roleMiddleware");
 
-// Récupérer les volontaires éligibles
-router.post("/fetch-volunteers", fetchVolunteersForCertificate);
+const requireEditor = [authMiddleware, roleMiddleware("ADMIN", "EDITOR")];
 
-// Générer les attestations
-router.post("/generate", generateCertificate);
+// 🔐 Outils internes de génération (espace admin uniquement)
+router.post("/fetch-volunteers", ...requireEditor, fetchVolunteersForCertificate);
+router.post("/generate", ...requireEditor, generateCertificate);
 
-// Télécharger une attestation ou lister les missions disponibles
+// 🌐 Auto-service public : le volontaire télécharge sa propre attestation
 router.post("/download", downloadCertificate);
 
-// QR Code → envoie l'ID de l'attestation
+// 🌐 QR Code public → vérification d'une attestation
 router.get("/verify/:id", verifyAttestation);
 
 module.exports = router;

@@ -91,28 +91,6 @@ const createOrUpdateVolunteer = async (req, res, next) => {
   }
 };
 
-/* ---------------------- Autocomplete email volontaire ---------------------- */
-const searchVolunteerByEmail = async (req, res, next) => {
-  try {
-    const { q } = req.query;
-
-    if (!q || q.length < 2) {
-      return res.json({ success: true, items: [] });
-    }
-
-    const regex = new RegExp(q, "i");
-
-    const volunteers = await Volunteer.find({ email: regex })
-      .select("email nom prenom telephone statut")
-      .limit(5);
-
-    res.json({ success: true, items: volunteers });
-  } catch (error) {
-    next(error);
-  }
-};
-
-
 /* ---------------------- Récupérer les volontaires pour certificat ---------------------- */
 const fetchVolunteersForCertificate = async (req, res, next) => {
   try {
@@ -218,7 +196,6 @@ const assignVolunteerMissions = async (req, res, next) => {
 module.exports = {
   createOrUpdateVolunteer,
   fetchVolunteersForCertificate,
-  searchVolunteerByEmail,
   listVolunteers,
   getVolunteerById,
   deleteVolunteer,

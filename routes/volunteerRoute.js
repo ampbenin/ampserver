@@ -4,22 +4,24 @@ const express = require("express");
 const {
   createOrUpdateVolunteer,
   fetchVolunteersForCertificate,
-  searchVolunteerByEmail,
   listVolunteers,
   getVolunteerById,
   deleteVolunteer,
   assignVolunteerMissions,
 } = require("../controllers/volunteerController");
+const authMiddleware = require("../middlewares/gestionamp/authMiddleware");
+const roleMiddleware = require("../middlewares/gestionamp/roleMiddleware");
 
 const router = express.Router();
+
+// 🔐 Outil interne de gestion des volontaires/missions (pas le formulaire public)
+router.use(authMiddleware, roleMiddleware("ADMIN", "EDITOR"));
 
 // ➕ Créer ou mettre à jour un volontaire
 router.post("/", createOrUpdateVolunteer);
 
 // 📥 Récupérer les volontaires pour certificat
 router.post("/certificates", fetchVolunteersForCertificate);
-
-router.post("/",   searchVolunteerByEmail);
 
 // 🔎 Lister les volontaires avec recherche et filtrage
 router.get("/", listVolunteers);

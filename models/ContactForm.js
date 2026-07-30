@@ -9,6 +9,10 @@ const ContactFormSchema = new mongoose.Schema({
   destination: { type: String, required: true },
   institution: { type: String },
   message: { type: String, required: true },
+
+  handled: { type: Boolean, default: false },
+  handledBy: { type: mongoose.Schema.Types.ObjectId, ref: "GestionAmpUser", default: null },
+  handledAt: { type: Date, default: null },
 }, { timestamps: true });
 
 // ⚡ Fonction pour récupérer le modèle après que formDB soit initialisé

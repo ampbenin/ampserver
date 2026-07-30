@@ -15,7 +15,11 @@ const memberSchema = new mongoose.Schema({
   otherInterest: { type: String },
   motivation: { type: String, required: true },
   consent: { type: Boolean, required: true },
-  createdAt: { type: Date, default: Date.now }
+  createdAt: { type: Date, default: Date.now },
+
+  status: { type: String, enum: ['pending', 'approved'], default: 'pending' },
+  handledBy: { type: mongoose.Schema.Types.ObjectId, ref: 'GestionAmpUser', default: null },
+  handledAt: { type: Date, default: null },
 });
 
 module.exports = mongoose.model('Member', memberSchema);

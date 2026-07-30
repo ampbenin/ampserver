@@ -12,17 +12,21 @@
   "description": "",
   "dependencies": {
     "@napi-rs/canvas": "^0.1.78",
+    "@sentry/node": "^8.55.0",
     "bcryptjs": "^3.0.2",
     "body-parser": "^2.2.0",
     "cloudinary": "^2.7.0",
     "cors": "^2.8.5",
     "dotenv": "^17.2.1",
     "express": "^5.1.0",
+    "express-rate-limit": "^8.2.1",
     "jsonwebtoken": "^9.0.2",
     "mongoose": "^8.18.0",
+    "multer": "^2.2.0",
     "nodemailer": "^7.0.11",
     "pdf-lib": "^1.17.1",
     "qrcode": "^1.5.4",
+    "resend": "^6.18.1",
     "streamifier": "^0.1.1"
   }
 }

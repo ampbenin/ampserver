@@ -2,6 +2,10 @@
 const express = require('express');
 const router = express.Router();
 const ctrl = require('../../controllers/admin/partnerController');
+const authMiddleware = require('../../middlewares/gestionamp/authMiddleware');
+const roleMiddleware = require('../../middlewares/gestionamp/roleMiddleware');
+
+router.use(authMiddleware, roleMiddleware('ADMIN'));
 
 router.get('/', ctrl.getAll);
 router.patch('/:id/approve', ctrl.approve);

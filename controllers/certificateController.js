@@ -49,6 +49,7 @@ const fetchVolunteersForCertificate = async (req, res) => {
 };
 
 /* -------------------- Génération des certificats -------------------- */
+
 const uploadFromBuffer = (buffer, folder) => {
   return new Promise((resolve, reject) => {
     const uploadStream = cloudinary.uploader.upload_stream(
@@ -62,37 +63,82 @@ const uploadFromBuffer = (buffer, folder) => {
   });
 };
 
+// Convertir des coordonnées en cm en pixels selon le template
+const cmToPx = (zoneCm, image) => {
+  const pxPerCmX = image.width / 21; // largeur du template en cm
+  const pxPerCmY = image.height / 29.7; // hauteur du template en cm (A4)
+  return {
+    x: zoneCm.x * pxPerCmX,
+    y: zoneCm.y * pxPerCmY,
+    width: zoneCm.width * pxPerCmX,
+    height: zoneCm.height * pxPerCmY,
+  };
+};
+
+// Zones converties à partir de l'ancien template
+const ZONE_NAME_CM = { x: 3.85, y: 12.0, width: 13.07, height: 2.95 };
+const ZONE_QR_CM = { x: 2.03, y: 22.21, width: 2.16, height: 4.35 };
+
+
+function fitNameText(ctx, text, maxWidth, maxHeight, fontFamily, initialSize) {
+  let fontSize = initialSize;
+  do {
+    ctx.font = `bold ${fontSize}px ${fontFamily}`;
+    const metrics = ctx.measureText(text);
+    const textHeight = metrics.actualBoundingBoxAscent + metrics.actualBoundingBoxDescent;
+    if (metrics.width <= maxWidth && textHeight <= maxHeight) break;
+    fontSize--;
+  } while (fontSize > 10);
+  return ctx.font;
+}
+
 const generateCertificate = async (req, res) => {
   try {
     const { titre, email, mode } = req.body;
-    if (!titre) return res.status(400).json({ message: "Titre de mission requis" });
+    if (!titre)
+      return res.status(400).json({ message: "Titre de mission requis" });
 
     const mission = await Mission.findOne({ titre });
-    if (!mission) return res.status(404).json({ message: "Mission introuvable" });
+    if (!mission)
+      return res.status(404).json({ message: "Mission introuvable" });
 
     let volunteers = [];
     if (mode === "Tous les volontaires") {
-      volunteers = await Volunteer.find({ "missions.missionId": mission._id }).populate("missions.missionId");
+      volunteers = await Volunteer.find({
+        "missions.missionId": mission._id,
+      }).populate("missions.missionId");
     } else if (mode === "Un volontaire" && email) {
-      const v = await Volunteer.findOne({ email, "missions.missionId": mission._id }).populate("missions.missionId");
+      const v = await Volunteer.findOne({
+        email,
+        "missions.missionId": mission._id,
+      }).populate("missions.missionId");
       if (v) volunteers.push(v);
     }
 
-    // Filtrer : uniquement les missions validées et sans attestation
-    volunteers = volunteers.filter(v => {
-      const m = v.missions.find(m => m.missionId._id.toString() === mission._id.toString() && m.statut === "Mission validée");
-      const alreadyGenerated = v.attestations?.some(a => a.missionId.toString() === mission._id.toString());
+    // Filtrer : missions validées et sans attestation
+    volunteers = volunteers.filter((v) => {
+      const m = v.missions.find(
+        (m) =>
+          m.missionId._id.toString() === mission._id.toString() &&
+          m.statut === "Mission validée"
+      );
+      const alreadyGenerated = v.attestations?.some(
+        (a) => a.missionId.toString() === mission._id.toString()
+      );
       return m && !alreadyGenerated;
     });
 
-    if (volunteers.length === 0) return res.status(404).json({ message: "Aucun volontaire trouvé" });
+    if (volunteers.length === 0)
+      return res.status(404).json({ message: "Aucun volontaire trouvé" });
 
     let generatedCount = 0;
 
     for (const volunteer of volunteers) {
-      const missionInfo = volunteer.missions.find(m => m.missionId._id.toString() === mission._id.toString());
+      const missionInfo = volunteer.missions.find(
+        (m) => m.missionId._id.toString() === mission._id.toString()
+      );
 
-      // Ajouter attestation vide pour générer un _id
+      // Créer une attestation vide pour générer l’ID
       volunteer.attestations.push({
         missionId: mission._id,
         missionName: mission.titre,
@@ -100,62 +146,74 @@ const generateCertificate = async (req, res) => {
       });
       await volunteer.save();
 
-      const attestation = volunteer.attestations[volunteer.attestations.length - 1];
+      const attestation =
+        volunteer.attestations[volunteer.attestations.length - 1];
 
       // Charger le template
-      const templatePath = path.resolve(__dirname, "../assets/attestation_mycountr229_08_2025.png");
+      const templatePath = path.resolve(
+        __dirname,
+        "../assets/attestation_mycountr229_08_2025.jpg"
+      );
       const templateBuffer = fs.readFileSync(templatePath);
       const templateImage = await loadImage(templateBuffer);
 
-      const canvas = createCanvas(templateImage.width, templateImage.height);
+      // Redimensionner le canvas pour A4
+      const maxWidth = 2480; // largeur A4 px
+      const maxHeight = 3508; // hauteur A4 px
+      const scaleX = maxWidth / templateImage.width;
+      const scaleY = maxHeight / templateImage.height;
+      const scale = Math.min(scaleX, scaleY);
+
+      const canvas = createCanvas(
+        templateImage.width * scale,
+        templateImage.height * scale
+      );
       const ctx = canvas.getContext("2d");
-      ctx.drawImage(templateImage, 0, 0);
+      ctx.drawImage(
+        templateImage,
+        0,
+        0,
+        canvas.width,
+        canvas.height
+      );
 
-      // Écriture Nom + Prénom
-      const rectName = { x1: 329, y1: 619, x2: 1639, y2: 723 };
-      const rectNameWidth = rectName.x2 - rectName.x1;
-      const rectNameHeight = rectName.y2 - rectName.y1;
-      const textNameX = rectName.x1 + rectNameWidth / 2;
-      const textNameY = rectName.y1 + rectNameHeight / 2;
-
-      function fitNameText(ctx, text, maxWidth, maxHeight, fontFamily, initialSize) {
-        let fontSize = initialSize;
-        do {
-          ctx.font = `bold ${fontSize}px ${fontFamily}`;
-          const metrics = ctx.measureText(text);
-          const textHeight = metrics.actualBoundingBoxAscent + metrics.actualBoundingBoxDescent;
-          if (metrics.width <= maxWidth && textHeight <= maxHeight) break;
-          fontSize--;
-        } while (fontSize > 10);
-        return ctx.font;
-      }
+      /* -------------------- NOM & PRÉNOM -------------------- */
+      const nameRect = cmToPx(ZONE_NAME_CM, canvas);
+      const textNameX = nameRect.x + nameRect.width / 2;
+      const textNameY = nameRect.y + nameRect.height / 2;
 
       ctx.fillStyle = "#190d86ff";
       ctx.textAlign = "center";
       ctx.textBaseline = "middle";
-      ctx.font = fitNameText(ctx, `${volunteer.nom} ${volunteer.prenom}`, rectNameWidth, rectNameHeight, "'Trebuchet MS', serif", 70);
+      ctx.font = fitNameText(
+        ctx,
+        `${volunteer.nom} ${volunteer.prenom}`,
+        nameRect.width,
+        nameRect.height,
+        "'Trebuchet MS', serif",
+        70
+      );
       ctx.fillText(`${volunteer.nom} ${volunteer.prenom}`, textNameX, textNameY);
 
-      // Génération QR Code
-      const rect = { x1: 193, y1: 1269, x2: 404, y2: 1052 };
-      const rectWidth = rect.x2 - rect.x1;
-      const rectHeight = rect.y1 - rect.y2;
-      const qrSize = Math.min(rectWidth, rectHeight) - 10;
-      const qrX = rect.x1 + (rectWidth - qrSize) / 2;
-      const qrY = rect.y2 + (rectHeight - qrSize) / 2;
+      /* -------------------- QR CODE -------------------- */
+      const qrRect = cmToPx(ZONE_QR_CM, canvas);
+      const qrSize = Math.min(qrRect.width, qrRect.height) - 10;
+      const qrX = qrRect.x + (qrRect.width - qrSize) / 2;
+      const qrY = qrRect.y + (qrRect.height - qrSize) / 2;
 
       const frontendBaseUrl = "https://ampbenin.netlify.app/verify";
-      const attestationId = attestation._id.toString();
-      const qrData = `${frontendBaseUrl}/${attestationId}`;
+      const qrData = `${frontendBaseUrl}/${attestation._id.toString()}`;
 
       const qrBuffer = await QRCode.toBuffer(qrData, { width: qrSize });
       const qrImage = await loadImage(qrBuffer);
       ctx.drawImage(qrImage, qrX, qrY, qrSize, qrSize);
 
-      // Génération PDF
+      /* -------------------- PDF -------------------- */
       const pdfDoc = await PDFDocument.create();
-      const pngBytes = canvas.toBuffer("image/png");
-      const pdfImage = await pdfDoc.embedPng(pngBytes);
+      // Export JPEG compressé pour réduire le poids
+      const jpgBytes = canvas.toBuffer("image/jpeg", { quality: 0.8 });
+      const pdfImage = await pdfDoc.embedJpg(jpgBytes);
+
       const page = pdfDoc.addPage([pdfImage.width, pdfImage.height]);
       page.drawImage(pdfImage, { x: 0, y: 0, width: pdfImage.width, height: pdfImage.height });
 
@@ -180,6 +238,7 @@ const generateCertificate = async (req, res) => {
     res.status(500).json({ message: error.message });
   }
 };
+
 
 /* -------------------- Télécharger une attestation -------------------- */
 const downloadCertificate = async (req, res) => {

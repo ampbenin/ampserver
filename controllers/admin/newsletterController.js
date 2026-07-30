@@ -1,27 +1,22 @@
 // controllers/admin/newsletterController.js
-const nodemailer = require('nodemailer');
-const getNewsletterModel = require('../../models/Newsletter'); 
-
-// ⚙️ Configuration transporteur nodemailer
-const transporter = nodemailer.createTransport({
-  host: process.env.SMTP_HOST || 'smtp.gmail.com',
-  port: process.env.SMTP_PORT ? parseInt(process.env.SMTP_PORT) : 587,
-  secure: process.env.SMTP_SECURE === 'true',
-  auth: {
-    user: process.env.SMTP_USER,
-    pass: process.env.SMTP_PASS,
-  },
-});
+const transporter = require('../../utils/mailer');
+const getNewsletterModel = require('../../models/Newsletter');
 
 /**
  * GET /admin/newsletters
  */
 exports.getAll = async (req, res) => {
   try {
-    const Newsletter = getNewsletterModel(); // ⚡ récupère le modèle après init formDB
-    console.log("🔥 getAll newsletters appelé");
-    const list = await Newsletter.find().sort({ createdAt: -1 });
-    return res.json(list);
+    const Newsletter = getNewsletterModel();
+    const { page = 1, limit = 25 } = req.query;
+    const skip = (Number(page) - 1) * Number(limit);
+
+    const [items, total] = await Promise.all([
+      Newsletter.find().sort({ createdAt: -1 }).skip(skip).limit(Number(limit)),
+      Newsletter.countDocuments(),
+    ]);
+
+    return res.json({ items, total, page: Number(page), limit: Number(limit) });
   } catch (err) {
     console.error("❌ ERREUR GET NEWSLETTER :", err);
     return res.status(500).json({ error: "Erreur serveur" });

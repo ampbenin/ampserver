@@ -1,73 +1,48 @@
-// plan.js
-require("dotenv").config();
-const mongoose = require("mongoose");
+/**
+ * Script : Création du premier ADMIN GESTION AMP
+ * Utilise EXACTEMENT la même config que le serveur
+ */
 
-const Volunteer = require("./models/volunteer");
-const Mission = require("./models/mission");
+const express = require("express");
+const dotenv = require("dotenv");
+const connectDB = require("./config/db");
+const cors = require("cors");
 
-const TARGET_MISSION_TITLE = "MyCountry229_08_2025";
 
-async function main() {
+async function createAdmin() {
   try {
-    // 1️⃣ Connexion à la BASE PRINCIPALE
-    await mongoose.connect(process.env.MONGODB_URI);
-    console.log("✅ Connecté à MongoDB (base principale)");
+    // 🔌 Connexion DB (MAIN + FORM)
+    dotenv.config();
+    connectDB();
+    
+    const User = getUserModel();
 
-    // 2️⃣ Récupérer la mission cible
-    const mission = await Mission.findOne({ titre: TARGET_MISSION_TITLE });
-    if (!mission) {
-      console.error(`❌ Mission "${TARGET_MISSION_TITLE}" introuvable`);
-      process.exit(1);
+    // 🔍 Vérifier s'il existe déjà
+    const existing = await User.findOne({ role: "ADMIN" });
+    if (existing) {
+      console.log("⚠️ Un ADMIN AMP existe déjà :", existing.email);
+      process.exit(0);
     }
 
-    console.log(`🎯 Mission cible : ${mission.titre}`);
+    // 👤 Création ADMIN
+    const admin = await User.create({
+      name: "Administrateur AMP",
+      email: "admin@amp.bj",
+      password: "admin123", // sera hashé automatiquement
+      role: "ADMIN",
+      mustChangePassword: true,
+      isActive: true,
+    });
 
-    // 3️⃣ Récupérer tous les volontaires
-    const volunteers = await Volunteer.find();
-    let updated = 0;
+    console.log("✅ ADMIN AMP créé avec succès");
+    console.log("📧 Email :", admin.email);
+    console.log("🔐 Mot de passe temporaire : admin123");
 
-    for (const volunteer of volunteers) {
-      const hasValidAttestation = volunteer.attestations?.some(
-        a => a.fileUrl && a.missionId
-      );
-
-      const statut = hasValidAttestation
-        ? "Mission validée"
-        : "Non disponible";
-
-      // Vérifier si la mission est déjà assignée
-      const alreadyAssigned = volunteer.missions.some(
-        m => m.missionId?.toString() === mission._id.toString()
-      );
-
-      if (!alreadyAssigned) {
-        volunteer.missions.push({
-          missionId: mission._id,
-          statut,
-        });
-        updated++;
-      } else {
-        // Mise à jour du statut si déjà présent
-        volunteer.missions = volunteer.missions.map(m => {
-          if (m.missionId?.toString() === mission._id.toString()) {
-            return { ...m, statut };
-          }
-          return m;
-        });
-      }
-
-      await volunteer.save();
-    }
-
-    console.log(`✅ Migration terminée`);
-    console.log(`🔄 Volontaires mis à jour : ${updated}`);
-
-    await mongoose.disconnect();
-    console.log("🔌 Déconnecté de MongoDB");
+    process.exit(0);
   } catch (err) {
-    console.error("❌ Erreur migration :", err);
+    console.error("❌ ERREUR SCRIPT :", err.message);
     process.exit(1);
   }
 }
 
-main();
+createAdmin();

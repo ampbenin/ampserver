@@ -3,8 +3,15 @@ const Partner = require('../../models/Partner');
 
 exports.getAll = async (req, res) => {
   try {
-    const items = await Partner.find().sort({ createdAt: -1 });
-    res.json(items);
+    const { page = 1, limit = 25 } = req.query;
+    const skip = (Number(page) - 1) * Number(limit);
+
+    const [items, total] = await Promise.all([
+      Partner.find().sort({ createdAt: -1 }).skip(skip).limit(Number(limit)),
+      Partner.countDocuments(),
+    ]);
+
+    res.json({ items, total, page: Number(page), limit: Number(limit) });
   } catch (err) {
     res.status(500).json({ error: 'Erreur serveur' });
   }
@@ -12,7 +19,11 @@ exports.getAll = async (req, res) => {
 
 exports.approve = async (req, res) => {
   try {
-    const updated = await Partner.findByIdAndUpdate(req.params.id, { status: 'approved' }, { new: true });
+    const updated = await Partner.findByIdAndUpdate(
+      req.params.id,
+      { status: 'approved', handledBy: req.user.id, handledAt: new Date() },
+      { new: true }
+    );
     res.json({ ok: true, partner: updated });
   } catch (err) {
     res.status(500).json({ error: 'Erreur serveur' });

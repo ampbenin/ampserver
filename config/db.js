@@ -3,11 +3,11 @@ const mongoose = require("mongoose");
 
 const connectDB = async () => {
   try {
-    // 🔵 Connexion 1 : Base principale
+    // 🔵 Connexion 1 : Base volontaire en ligne
     const mainConn = await mongoose.connect(process.env.MONGODB_URI);
     console.log(`✅ MongoDB connecté - BASE PRINCIPALE : ${mainConn.connection.host}`);
 
-    // 🔵 Connexion 2 : Base formulaire
+    // 🔵 Connexion 2 : Base formulaire + admin
     if (process.env.MONGODB_URI_FORM) {
       const formConn = mongoose.createConnection(process.env.MONGODB_URI_FORM);
 
