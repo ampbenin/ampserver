@@ -127,3 +127,8 @@ module.exports = function getNumsalCourseModel() {
 
   return formDB.models.NumsalCourse || formDB.model("NumsalCourse", NumsalCourseSchema);
 };
+
+// Réutilisé tel quel par NumsalFormTemplate — un modèle de formulaire stocke
+// exactement le même type de champs qu'un programme, pour pouvoir être
+// importé directement dans applicationForm.fields sans conversion.
+module.exports.ApplicationFieldSchema = ApplicationFieldSchema;

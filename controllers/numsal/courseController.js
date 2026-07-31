@@ -211,6 +211,16 @@ const validateLessonPayload = (lesson) => {
 exports.listPublicCourses = async (req, res, next) => {
   try {
     const Course = getNumsalCourseModel();
+    // Le populate ci-dessous résout "trainerId" par le nom de modèle
+    // Mongoose "NumsalUser" (déclaré dans le schéma via `ref`) — ce nom
+    // n'est enregistré dans ce process qu'au premier appel réel de
+    // getNumsalUserModel(). Comme cette route est publique et peut donc être
+    // la toute première requête servie après un redémarrage (avant qu'aucune
+    // route authentifiée n'ait eu l'occasion d'enregistrer le modèle), on
+    // force cet enregistrement ici pour éviter une erreur "Schema hasn't
+    // been registered for model NumsalUser" sur un process fraîchement
+    // démarré.
+    getNumsalUserModel();
     const courses = await Course.find({ status: "PUBLISHED" })
       .select("title description coverImageUrl trainerId lessons createdAt modality accessMode featuredOnHome")
       .populate("trainerId", "name")
@@ -230,27 +240,6 @@ exports.listPublicCourses = async (req, res, next) => {
     }));
 
     res.json({ items });
-  } catch (error) {
-    next(error);
-  }
-};
-
-/* -------------------- Public : quelques chiffres agrégés pour la page d'accueil -------------------- */
-/* Uniquement des compteurs, rien de sensible — pas d'auth nécessaire. */
-exports.getPublicStats = async (req, res, next) => {
-  try {
-    const Course = getNumsalCourseModel();
-    const NumsalUser = getNumsalUserModel();
-    const Enrollment = getNumsalEnrollmentModel();
-
-    const [learners, trainers, publishedCourses, enrollments] = await Promise.all([
-      NumsalUser.countDocuments({ role: "APPRENANT" }),
-      NumsalUser.countDocuments({ role: "FORMATEUR" }),
-      Course.countDocuments({ status: "PUBLISHED" }),
-      Enrollment.countDocuments(),
-    ]);
-
-    res.json({ learners, trainers, publishedCourses, enrollments });
   } catch (error) {
     next(error);
   }
@@ -367,7 +356,7 @@ exports.updateCourseMeta = async (req, res, next) => {
     const {
       title, description, coverImageUrl, status,
       modality, accessMode, admissionInstructions, applicationFormFields,
-      contactWhatsapp, contactEmail, featuredOnHome,
+      contactWhatsapp, contactEmail, featuredOnHome, trainerId,
     } = req.body;
 
     if (title !== undefined) course.title = title;
@@ -380,6 +369,17 @@ exports.updateCourseMeta = async (req, res, next) => {
     if (contactWhatsapp !== undefined) course.contactWhatsapp = contactWhatsapp;
     if (contactEmail !== undefined) course.contactEmail = contactEmail;
     if (featuredOnHome !== undefined) course.featuredOnHome = !!featuredOnHome;
+    // Réattribuer le formateur responsable est réservé à l'ADMIN — un
+    // formateur ne doit pas pouvoir céder/transférer son propre programme.
+    if (trainerId !== undefined && trainerId !== String(course.trainerId)) {
+      if (req.user.role !== "ADMIN") {
+        return res.status(403).json({ message: "Seul un administrateur peut réattribuer le formateur responsable" });
+      }
+      const NumsalUser = getNumsalUserModel();
+      const trainer = await NumsalUser.findOne({ _id: trainerId, role: "FORMATEUR" });
+      if (!trainer) return res.status(400).json({ message: "Formateur introuvable" });
+      course.trainerId = trainerId;
+    }
     if (Array.isArray(applicationFormFields)) {
       const defError = validateFormFieldsDefinition(applicationFormFields);
       if (defError) return res.status(400).json({ message: defError });
@@ -515,8 +515,9 @@ exports.reorderLessons = async (req, res, next) => {
 exports.getApplicationForm = async (req, res, next) => {
   try {
     const Course = getNumsalCourseModel();
+    getNumsalUserModel(); // voir le commentaire équivalent dans listPublicCourses
     const course = await Course.findOne({ _id: req.params.id, status: "PUBLISHED" })
-      .select("title description modality accessMode applicationForm")
+      .select("title description modality accessMode applicationForm admissionInstructions lessons")
       .populate("trainerId", "name");
 
     if (!course) return res.status(404).json({ message: "Programme introuvable" });
@@ -528,6 +529,9 @@ exports.getApplicationForm = async (req, res, next) => {
       title: course.title,
       description: course.description,
       modality: course.modality,
+      trainerName: course.trainerId?.name || "",
+      admissionInstructions: course.admissionInstructions || "",
+      lessonCount: (course.lessons || []).length,
       fields: ensureBuiltinFields(course.applicationForm?.fields),
     });
   } catch (error) {
