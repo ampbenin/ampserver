@@ -113,6 +113,10 @@ const NumsalCourseSchema = new mongoose.Schema(
     // Pertinent uniquement quand accessMode === "APPLICATION".
     applicationForm: {
       fields: { type: [ApplicationFieldSchema], default: [] },
+      // Texte libre saisi par le formateur/admin (ex : "5 minutes"),
+      // affiché sur l'écran de couverture du candidat à la place d'une
+      // estimation calculée automatiquement à partir du nombre de champs.
+      estimatedDuration: { type: String, default: "" },
     },
   },
   { timestamps: true }

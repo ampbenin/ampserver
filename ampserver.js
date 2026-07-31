@@ -149,6 +149,7 @@ app.use("/numsal/api/mentor-notes", require("./routes/numsal/mentorNoteRoutes"))
 app.use("/numsal/api/partners", require("./routes/numsal/partnerRoutes"));
 app.use("/numsal/api/form-templates", require("./routes/numsal/formTemplateRoutes"));
 app.use("/numsal/api/home-stats", require("./routes/numsal/homeStatRoutes"));
+app.use("/numsal/api/testimonials", require("./routes/numsal/testimonialRoutes"));
 
 // ==========================
 // ❌ GESTION DES ERREURS

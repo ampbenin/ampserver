@@ -356,7 +356,7 @@ exports.updateCourseMeta = async (req, res, next) => {
     const {
       title, description, coverImageUrl, status,
       modality, accessMode, admissionInstructions, applicationFormFields,
-      contactWhatsapp, contactEmail, featuredOnHome, trainerId,
+      contactWhatsapp, contactEmail, featuredOnHome, trainerId, estimatedDuration,
     } = req.body;
 
     if (title !== undefined) course.title = title;
@@ -380,10 +380,17 @@ exports.updateCourseMeta = async (req, res, next) => {
       if (!trainer) return res.status(400).json({ message: "Formateur introuvable" });
       course.trainerId = trainerId;
     }
+    // Mutation champ par champ (jamais un remplacement complet de
+    // `applicationForm`) pour qu'enregistrer les champs et enregistrer la
+    // durée estimée restent deux actions indépendantes, sans que l'une
+    // écrase silencieusement l'autre.
+    if (estimatedDuration !== undefined) {
+      course.applicationForm.estimatedDuration = estimatedDuration;
+    }
     if (Array.isArray(applicationFormFields)) {
       const defError = validateFormFieldsDefinition(applicationFormFields);
       if (defError) return res.status(400).json({ message: defError });
-      course.applicationForm = { fields: applicationFormFields };
+      course.applicationForm.fields = applicationFormFields;
     }
 
     await course.save();
@@ -532,6 +539,7 @@ exports.getApplicationForm = async (req, res, next) => {
       trainerName: course.trainerId?.name || "",
       admissionInstructions: course.admissionInstructions || "",
       lessonCount: (course.lessons || []).length,
+      estimatedDuration: course.applicationForm?.estimatedDuration || "",
       fields: ensureBuiltinFields(course.applicationForm?.fields),
     });
   } catch (error) {
