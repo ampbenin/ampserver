@@ -146,6 +146,7 @@ app.use("/numsal/api/admin", require("./routes/numsal/adminRoutes"));
 app.use("/numsal/api/courses", require("./routes/numsal/courseRoutes"));
 app.use("/numsal/api/enrollments", require("./routes/numsal/enrollmentRoutes"));
 app.use("/numsal/api/mentor-notes", require("./routes/numsal/mentorNoteRoutes"));
+app.use("/numsal/api/partners", require("./routes/numsal/partnerRoutes"));
 
 // ==========================
 // ❌ GESTION DES ERREURS
