@@ -79,6 +79,10 @@ const NumsalCourseSchema = new mongoose.Schema(
     coverImageUrl: { type: String, default: "" },
     lessons: { type: [LessonSchema], default: [] },
 
+    // Coché par l'admin pour faire apparaître ce programme dans les
+    // "Programmes phares" de la page d'accueil publique.
+    featuredOnHome: { type: Boolean, default: false },
+
     modality: {
       type: String,
       enum: ["ONLINE", "IN_PERSON", "HYBRID"],

@@ -374,7 +374,7 @@ exports.listAllCourses = async (req, res) => {
   try {
     const NumsalCourse = getNumsalCourseModel();
     const courses = await NumsalCourse.find()
-      .select("title status modality accessMode trainerId tutorIds")
+      .select("title status modality accessMode trainerId tutorIds featuredOnHome")
       .populate("trainerId", "name")
       .populate("tutorIds", "name email")
       .sort({ createdAt: -1 });

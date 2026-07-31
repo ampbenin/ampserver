@@ -212,7 +212,7 @@ exports.listPublicCourses = async (req, res, next) => {
   try {
     const Course = getNumsalCourseModel();
     const courses = await Course.find({ status: "PUBLISHED" })
-      .select("title description coverImageUrl trainerId lessons createdAt modality accessMode")
+      .select("title description coverImageUrl trainerId lessons createdAt modality accessMode featuredOnHome")
       .populate("trainerId", "name")
       .sort({ createdAt: -1 });
 
@@ -226,6 +226,7 @@ exports.listPublicCourses = async (req, res, next) => {
       createdAt: c.createdAt,
       modality: c.modality,
       accessMode: c.accessMode,
+      featuredOnHome: c.featuredOnHome,
     }));
 
     res.json({ items });
@@ -317,7 +318,7 @@ exports.listCoursesToReview = async (req, res, next) => {
 exports.createCourse = async (req, res, next) => {
   try {
     const Course = getNumsalCourseModel();
-    const { title, description, coverImageUrl, status, modality, accessMode, trainerId } = req.body;
+    const { title, description, coverImageUrl, status, modality, accessMode, trainerId, featuredOnHome } = req.body;
 
     if (!title) return res.status(400).json({ message: "Titre requis" });
 
@@ -339,6 +340,7 @@ exports.createCourse = async (req, res, next) => {
       status: status === "PUBLISHED" ? "PUBLISHED" : "DRAFT",
       modality: ["ONLINE", "IN_PERSON", "HYBRID"].includes(modality) ? modality : "ONLINE",
       accessMode: accessMode === "OPEN" ? "OPEN" : "APPLICATION",
+      featuredOnHome: !!featuredOnHome,
       trainerId: ownerId,
     });
 
@@ -365,7 +367,7 @@ exports.updateCourseMeta = async (req, res, next) => {
     const {
       title, description, coverImageUrl, status,
       modality, accessMode, admissionInstructions, applicationFormFields,
-      contactWhatsapp, contactEmail,
+      contactWhatsapp, contactEmail, featuredOnHome,
     } = req.body;
 
     if (title !== undefined) course.title = title;
@@ -377,6 +379,7 @@ exports.updateCourseMeta = async (req, res, next) => {
     if (admissionInstructions !== undefined) course.admissionInstructions = admissionInstructions;
     if (contactWhatsapp !== undefined) course.contactWhatsapp = contactWhatsapp;
     if (contactEmail !== undefined) course.contactEmail = contactEmail;
+    if (featuredOnHome !== undefined) course.featuredOnHome = !!featuredOnHome;
     if (Array.isArray(applicationFormFields)) {
       const defError = validateFormFieldsDefinition(applicationFormFields);
       if (defError) return res.status(400).json({ message: defError });
