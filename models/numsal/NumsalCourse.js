@@ -83,6 +83,12 @@ const NumsalCourseSchema = new mongoose.Schema(
     coverImageUrl: { type: String, default: "" },
     lessons: { type: [LessonSchema], default: [] },
 
+    // Couleur de marque du programme (hex, ex : "#5B21B6") — pilote le
+    // dégradé de fond et les boutons de l'assistant de candidature
+    // (Typeform-like) côté candidat. Vide = identité violette par défaut de
+    // NumSAL (voir derivePalette dans ApplicationForm.jsx).
+    brandColor: { type: String, default: "" },
+
     // Durée du programme lui-même (texte libre, ex : "3 mois", "6 séances de 2h").
     duration: { type: String, default: "" },
 

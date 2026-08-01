@@ -15,6 +15,11 @@ const { renderNumsalEmail, renderContactBlockText, escapeHtml } = require("../..
 
 const MODALITY_LABELS = { ONLINE: "En ligne", IN_PERSON: "Présentiel", HYBRID: "Hybride" };
 
+// Format hex strict (#RRGGBB) — cette valeur est réinjectée telle quelle dans
+// une balise <style> côté candidat (voir ApplicationForm.jsx), donc on ne
+// stocke jamais autre chose qu'un hex valide.
+const isValidHexColor = (value) => /^#[0-9a-fA-F]{6}$/.test(value);
+
 /* Fait passer au statut CLOSED tout programme PUBLISHED dont la date limite
    de candidature est dépassée. Pas de tâche planifiée dans ce projet : cette
    fonction est donc appelée au début de chaque route qui lit/liste des
@@ -330,10 +335,13 @@ exports.createCourse = async (req, res, next) => {
     const Course = getNumsalCourseModel();
     const {
       title, description, coverImageUrl, status, modality, accessMode,
-      trainerId, featuredOnHome, duration, applicationDeadline,
+      trainerId, featuredOnHome, duration, applicationDeadline, brandColor,
     } = req.body;
 
     if (!title) return res.status(400).json({ message: "Titre requis" });
+    if (brandColor && !isValidHexColor(brandColor)) {
+      return res.status(400).json({ message: "Couleur invalide (format attendu : #RRGGBB)" });
+    }
 
     let ownerId = req.user.id;
     if (req.user.role === "ADMIN") {
@@ -356,6 +364,7 @@ exports.createCourse = async (req, res, next) => {
       featuredOnHome: !!featuredOnHome,
       duration: duration || "",
       applicationDeadline: applicationDeadline || null,
+      brandColor: brandColor || "",
       trainerId: ownerId,
     });
 
@@ -383,8 +392,12 @@ exports.updateCourseMeta = async (req, res, next) => {
       title, description, coverImageUrl, status,
       modality, accessMode, admissionInstructions, applicationFormFields,
       contactWhatsapp, contactEmail, featuredOnHome, trainerId, estimatedDuration,
-      duration, applicationDeadline,
+      duration, applicationDeadline, brandColor,
     } = req.body;
+
+    if (brandColor && !isValidHexColor(brandColor)) {
+      return res.status(400).json({ message: "Couleur invalide (format attendu : #RRGGBB)" });
+    }
 
     if (title !== undefined) course.title = title;
     if (description !== undefined) course.description = description;
@@ -398,6 +411,7 @@ exports.updateCourseMeta = async (req, res, next) => {
     if (featuredOnHome !== undefined) course.featuredOnHome = !!featuredOnHome;
     if (duration !== undefined) course.duration = duration;
     if (applicationDeadline !== undefined) course.applicationDeadline = applicationDeadline || null;
+    if (brandColor !== undefined) course.brandColor = brandColor;
     // Réattribuer le formateur responsable est réservé à l'ADMIN — un
     // formateur ne doit pas pouvoir céder/transférer son propre programme.
     if (trainerId !== undefined && trainerId !== String(course.trainerId)) {
@@ -554,7 +568,7 @@ exports.getApplicationForm = async (req, res, next) => {
     getNumsalUserModel(); // voir le commentaire équivalent dans listPublicCourses
     await closeExpiredCourses();
     const course = await Course.findById(req.params.id)
-      .select("title description modality accessMode status applicationForm admissionInstructions lessons duration applicationDeadline")
+      .select("title description modality accessMode status applicationForm admissionInstructions lessons duration applicationDeadline brandColor")
       .populate("trainerId", "name");
 
     if (!course || course.status === "DRAFT" || course.status === "ARCHIVED") {
@@ -576,6 +590,7 @@ exports.getApplicationForm = async (req, res, next) => {
       lessonCount: (course.lessons || []).length,
       duration: course.duration || "",
       applicationDeadline: course.applicationDeadline,
+      brandColor: course.brandColor || "",
       estimatedDuration: course.applicationForm?.estimatedDuration || "",
       fields: ensureBuiltinFields(course.applicationForm?.fields),
     });
