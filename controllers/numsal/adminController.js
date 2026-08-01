@@ -10,6 +10,7 @@ const getNumsalUserModel = require("../../models/numsal/NumsalUser");
 const getNumsalCourseModel = require("../../models/numsal/NumsalCourse");
 const getNumsalApplicationModel = require("../../models/numsal/NumsalApplication");
 const getNumsalEnrollmentModel = require("../../models/numsal/NumsalEnrollment");
+const { closeExpiredCourses } = require("./courseController");
 
 // Les comptes ADMIN ne sont volontairement pas gérables depuis ce panneau
 // (modification/blocage/suppression/réinitialisation) — voir scripts/numsal
@@ -373,8 +374,9 @@ exports.assignLearnersToTutor = async (req, res) => {
 exports.listAllCourses = async (req, res) => {
   try {
     const NumsalCourse = getNumsalCourseModel();
+    await closeExpiredCourses();
     const courses = await NumsalCourse.find()
-      .select("title status modality accessMode trainerId tutorIds featuredOnHome")
+      .select("title status modality accessMode trainerId tutorIds featuredOnHome duration applicationDeadline")
       .populate("trainerId", "name")
       .populate("tutorIds", "name email")
       .sort({ createdAt: -1 });

@@ -15,6 +15,23 @@ const { renderNumsalEmail, renderContactBlockText, escapeHtml } = require("../..
 
 const MODALITY_LABELS = { ONLINE: "En ligne", IN_PERSON: "Présentiel", HYBRID: "Hybride" };
 
+/* Fait passer au statut CLOSED tout programme PUBLISHED dont la date limite
+   de candidature est dépassée. Pas de tâche planifiée dans ce projet : cette
+   fonction est donc appelée au début de chaque route qui lit/liste des
+   programmes, ce qui suffit à garder le statut à jour en continu (le
+   catalogue public et le tableau de bord admin sont consultés en
+   permanence). Une fois CLOSED, un programme ne redevient PUBLISHED que si
+   un formateur/admin le republie explicitement — choix confirmé par
+   l'utilisateur (pas de réouverture automatique si la date est reculée). */
+const closeExpiredCourses = async () => {
+  const Course = getNumsalCourseModel();
+  await Course.updateMany(
+    { status: "PUBLISHED", applicationDeadline: { $ne: null, $lt: new Date() } },
+    { status: "CLOSED" }
+  );
+};
+exports.closeExpiredCourses = closeExpiredCourses;
+
 /* Champs "système" toujours présents dans le formulaire de candidature.
    Nom/Email sont verrouillés (jamais supprimables — l'email sert à créer le
    compte du candidat admis) ; Téléphone est entièrement libre, comme un
@@ -221,8 +238,9 @@ exports.listPublicCourses = async (req, res, next) => {
     // been registered for model NumsalUser" sur un process fraîchement
     // démarré.
     getNumsalUserModel();
+    await closeExpiredCourses();
     const courses = await Course.find({ status: "PUBLISHED" })
-      .select("title description coverImageUrl trainerId lessons createdAt modality accessMode featuredOnHome")
+      .select("title description coverImageUrl trainerId lessons createdAt modality accessMode featuredOnHome duration applicationDeadline")
       .populate("trainerId", "name")
       .sort({ createdAt: -1 });
 
@@ -237,6 +255,8 @@ exports.listPublicCourses = async (req, res, next) => {
       modality: c.modality,
       accessMode: c.accessMode,
       featuredOnHome: c.featuredOnHome,
+      duration: c.duration,
+      applicationDeadline: c.applicationDeadline,
     }));
 
     res.json({ items });
@@ -250,6 +270,7 @@ exports.listPublicCourses = async (req, res, next) => {
 exports.getCourseById = async (req, res, next) => {
   try {
     const Course = getNumsalCourseModel();
+    await closeExpiredCourses();
     const course = await Course.findById(req.params.id);
     if (!course) return res.status(404).json({ message: "Cours introuvable" });
 
@@ -307,7 +328,10 @@ exports.listCoursesToReview = async (req, res, next) => {
 exports.createCourse = async (req, res, next) => {
   try {
     const Course = getNumsalCourseModel();
-    const { title, description, coverImageUrl, status, modality, accessMode, trainerId, featuredOnHome } = req.body;
+    const {
+      title, description, coverImageUrl, status, modality, accessMode,
+      trainerId, featuredOnHome, duration, applicationDeadline,
+    } = req.body;
 
     if (!title) return res.status(400).json({ message: "Titre requis" });
 
@@ -330,6 +354,8 @@ exports.createCourse = async (req, res, next) => {
       modality: ["ONLINE", "IN_PERSON", "HYBRID"].includes(modality) ? modality : "ONLINE",
       accessMode: accessMode === "OPEN" ? "OPEN" : "APPLICATION",
       featuredOnHome: !!featuredOnHome,
+      duration: duration || "",
+      applicationDeadline: applicationDeadline || null,
       trainerId: ownerId,
     });
 
@@ -357,6 +383,7 @@ exports.updateCourseMeta = async (req, res, next) => {
       title, description, coverImageUrl, status,
       modality, accessMode, admissionInstructions, applicationFormFields,
       contactWhatsapp, contactEmail, featuredOnHome, trainerId, estimatedDuration,
+      duration, applicationDeadline,
     } = req.body;
 
     if (title !== undefined) course.title = title;
@@ -369,6 +396,8 @@ exports.updateCourseMeta = async (req, res, next) => {
     if (contactWhatsapp !== undefined) course.contactWhatsapp = contactWhatsapp;
     if (contactEmail !== undefined) course.contactEmail = contactEmail;
     if (featuredOnHome !== undefined) course.featuredOnHome = !!featuredOnHome;
+    if (duration !== undefined) course.duration = duration;
+    if (applicationDeadline !== undefined) course.applicationDeadline = applicationDeadline || null;
     // Réattribuer le formateur responsable est réservé à l'ADMIN — un
     // formateur ne doit pas pouvoir céder/transférer son propre programme.
     if (trainerId !== undefined && trainerId !== String(course.trainerId)) {
@@ -523,11 +552,17 @@ exports.getApplicationForm = async (req, res, next) => {
   try {
     const Course = getNumsalCourseModel();
     getNumsalUserModel(); // voir le commentaire équivalent dans listPublicCourses
-    const course = await Course.findOne({ _id: req.params.id, status: "PUBLISHED" })
-      .select("title description modality accessMode applicationForm admissionInstructions lessons")
+    await closeExpiredCourses();
+    const course = await Course.findById(req.params.id)
+      .select("title description modality accessMode status applicationForm admissionInstructions lessons duration applicationDeadline")
       .populate("trainerId", "name");
 
-    if (!course) return res.status(404).json({ message: "Programme introuvable" });
+    if (!course || course.status === "DRAFT" || course.status === "ARCHIVED") {
+      return res.status(404).json({ message: "Programme introuvable" });
+    }
+    if (course.status === "CLOSED") {
+      return res.status(400).json({ message: "Les candidatures pour ce programme sont closes (date limite dépassée)." });
+    }
     if (course.accessMode !== "APPLICATION") {
       return res.status(400).json({ message: "Ce programme est en accès direct, aucune candidature n'est nécessaire" });
     }
@@ -539,6 +574,8 @@ exports.getApplicationForm = async (req, res, next) => {
       trainerName: course.trainerId?.name || "",
       admissionInstructions: course.admissionInstructions || "",
       lessonCount: (course.lessons || []).length,
+      duration: course.duration || "",
+      applicationDeadline: course.applicationDeadline,
       estimatedDuration: course.applicationForm?.estimatedDuration || "",
       fields: ensureBuiltinFields(course.applicationForm?.fields),
     });
@@ -553,8 +590,14 @@ exports.applyToCourse = async (req, res, next) => {
     const Course = getNumsalCourseModel();
     const Application = getNumsalApplicationModel();
 
-    const course = await Course.findOne({ _id: req.params.id, status: "PUBLISHED" });
-    if (!course) return res.status(404).json({ message: "Programme introuvable" });
+    await closeExpiredCourses();
+    const course = await Course.findById(req.params.id);
+    if (!course || course.status === "DRAFT" || course.status === "ARCHIVED") {
+      return res.status(404).json({ message: "Programme introuvable" });
+    }
+    if (course.status === "CLOSED") {
+      return res.status(400).json({ message: "Les candidatures pour ce programme sont closes (date limite dépassée)." });
+    }
 
     if (course.accessMode !== "APPLICATION") {
       return res.status(400).json({

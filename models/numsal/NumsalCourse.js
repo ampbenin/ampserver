@@ -71,13 +71,26 @@ const NumsalCourseSchema = new mongoose.Schema(
       ref: "NumsalUser",
       required: true,
     },
+    // CLOSED n'est jamais choisi manuellement à la création — il est pris
+    // automatiquement par le backend quand applicationDeadline est dépassée
+    // (voir closeExpiredCourses dans courseController.js), et ne redevient
+    // PUBLISHED que si un admin/formateur le republie explicitement.
     status: {
       type: String,
-      enum: ["DRAFT", "PUBLISHED", "ARCHIVED"],
+      enum: ["DRAFT", "PUBLISHED", "ARCHIVED", "CLOSED"],
       default: "DRAFT",
     },
     coverImageUrl: { type: String, default: "" },
     lessons: { type: [LessonSchema], default: [] },
+
+    // Durée du programme lui-même (texte libre, ex : "3 mois", "6 séances de 2h").
+    duration: { type: String, default: "" },
+
+    // Date limite pour postuler — vide = candidatures ouvertes en tout
+    // temps. Une fois dépassée, le programme passe automatiquement au
+    // statut CLOSED (voir closeExpiredCourses). Pertinent uniquement quand
+    // accessMode === "APPLICATION".
+    applicationDeadline: { type: Date, default: null },
 
     // Coché par l'admin pour faire apparaître ce programme dans les
     // "Programmes phares" de la page d'accueil publique.
