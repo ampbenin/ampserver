@@ -5,7 +5,41 @@
  */
 
 const Sentry = require("@sentry/node");
+const streamifier = require("streamifier");
+const cloudinary = require("../../utils/cloudinary");
 const getNumsalPartnerModel = require("../../models/numsal/NumsalPartner");
+
+const uploadFromBuffer = (buffer, folder) => {
+  return new Promise((resolve, reject) => {
+    const uploadStream = cloudinary.uploader.upload_stream(
+      { folder, resource_type: "image" },
+      (error, result) => {
+        if (error) return reject(error);
+        resolve(result);
+      }
+    );
+    streamifier.createReadStream(buffer).pipe(uploadStream);
+  });
+};
+
+/* -------------------- ADMIN : uploader le logo d'un partenaire -------------------- */
+/* Même mécanisme que controllers/cms/mediaController.js (multer en mémoire
+   + cloudinary.uploader.upload_stream) — pas de bibliothèque de médias côté
+   NumSAL, on renvoie juste l'URL sécurisée directement utilisable dans
+   logoUrl, cohérent avec le fait que ce champ est un simple champ texte. */
+exports.uploadLogo = async (req, res) => {
+  try {
+    if (!req.file) {
+      return res.status(400).json({ message: "Aucun fichier reçu" });
+    }
+
+    const uploaded = await uploadFromBuffer(req.file.buffer, "numsal/partners");
+    res.status(201).json({ url: uploaded.secure_url });
+  } catch (error) {
+    Sentry.captureException(error);
+    res.status(500).json({ message: "Erreur lors de l'envoi de l'image", error: error.message });
+  }
+};
 
 /* -------------------- Public : liste des partenaires -------------------- */
 exports.listPartners = async (req, res, next) => {
