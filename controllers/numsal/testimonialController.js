@@ -6,7 +6,41 @@
  */
 
 const Sentry = require("@sentry/node");
+const streamifier = require("streamifier");
+const cloudinary = require("../../utils/cloudinary");
 const getNumsalTestimonialModel = require("../../models/numsal/NumsalTestimonial");
+
+const uploadFromBuffer = (buffer, folder) => {
+  return new Promise((resolve, reject) => {
+    const uploadStream = cloudinary.uploader.upload_stream(
+      { folder, resource_type: "image" },
+      (error, result) => {
+        if (error) return reject(error);
+        resolve(result);
+      }
+    );
+    streamifier.createReadStream(buffer).pipe(uploadStream);
+  });
+};
+
+/* -------------------- Public : uploader une photo de profil -------------------- */
+/* Accessible sans compte (comme la soumission d'avis elle-même) — limité par
+   authLimiter côté routes et par le fileFilter multer (image uniquement),
+   puisque contrairement à l'upload de logo partenaire (réservé ADMIN) ce
+   point d'entrée est ouvert à n'importe quel visiteur. */
+exports.uploadPhoto = async (req, res) => {
+  try {
+    if (!req.file) {
+      return res.status(400).json({ message: "Aucun fichier reçu" });
+    }
+
+    const uploaded = await uploadFromBuffer(req.file.buffer, "numsal/testimonials");
+    res.status(201).json({ url: uploaded.secure_url });
+  } catch (error) {
+    Sentry.captureException(error);
+    res.status(500).json({ message: "Erreur lors de l'envoi de l'image", error: error.message });
+  }
+};
 
 /* -------------------- Public : avis publiés -------------------- */
 exports.listPublishedTestimonials = async (req, res, next) => {
