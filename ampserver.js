@@ -25,11 +25,9 @@ const connectDB = require("./config/db");
 const cors = require("cors");
 
 const volunteerRoutes = require("./routes/volunteerRoute");
-const missionRoutes = require("./routes/missionRoute");
 const certificateRoutes = require("./routes/certificateRoute");
 const newsletterRoutes = require("./routes/newsletterRoute");
 const contactRoutes = require("./routes/contactRoute");
-const volunteerFormRoutes = require("./routes/volunteerFormRoute");
 const partnerRoutes = require("./routes/partnerRoute");
 const memberRoutes = require("./routes/memberRoute");
 
@@ -57,18 +55,18 @@ app.use(cors({
 // 🌐 API EXISTANTE
 // ==========================
 app.use("/api/volunteers", volunteerRoutes);
-app.use("/api/missions", missionRoutes);
 app.use("/api/certificates", certificateRoutes);
-// Nouveau système de programmes de volontariat (façon NumSAL) — remplace à
-// terme /api/missions + /api/volunteer-form + /admin/volunteers, montés en
-// parallèle pour l'instant le temps de valider la bascule (voir le plan de
-// migration).
+// Système de programmes de volontariat (façon NumSAL) — remplace
+// définitivement l'ancien /api/missions + /api/volunteer-form +
+// /admin/volunteers (montage retiré, voir le plan de migration ;
+// controllers/missionController.js, volunteerFormController.js,
+// routes/missionRoute.js, routes/volunteerFormRoute.js et
+// routes/admin/volunteers.js restent dans le repo mais ne sont plus montés).
 app.use("/api/volunteer-programs", require("./routes/volunteerProgramRoute"));
 app.use("/api/volunteer-applications", require("./routes/volunteerApplicationRoute"));
 app.use("/api/volunteer-form-templates", require("./routes/volunteerFormTemplateRoute"));
 app.use("/api/newsletter", newsletterRoutes);
 app.use("/api/contact", contactRoutes);
-app.use("/api/volunteer-form", volunteerFormRoutes);
 app.use("/api/partner-form", partnerRoutes);
 app.use("/api/members", memberRoutes);
 
@@ -79,7 +77,6 @@ app.use("/admin/newsletters", require("./routes/admin/newsletter"));
 app.use("/admin/contacts", require("./routes/admin/contact"));
 app.use("/admin/members", require("./routes/admin/members"));
 app.use("/admin/partners", require("./routes/admin/partners"));
-app.use("/admin/volunteers", require("./routes/admin/volunteers"));
 
 // ===================================================
 // 🚀 GESTION AMP BENIN (SOUS-SYSTÈME ISOLÉ)
