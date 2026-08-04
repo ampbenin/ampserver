@@ -1,47 +1,79 @@
 // controllers/volunteerController.js
+// Fichier des volontaires (profil persistant à travers plusieurs
+// programmes) — évolué pour référencer VolunteerProgram au lieu de
+// l'ancien Mission. VolunteerProgram vit sur global.formDB (comme NumSAL),
+// Volunteer reste sur la connexion par défaut : `.populate()` Mongoose ne
+// fonctionne pas entre deux connexions différentes, donc les titres de
+// programme sont résolus manuellement (voir attachProgramTitles) au lieu
+// d'un populate("programs.programId", "title") qui échouerait
+// silencieusement.
 
 const mongoose = require("mongoose");
 const Volunteer = require("../models/volunteer");
-const Mission = require("../models/mission");
+const getVolunteerProgramModel = require("../models/volunteerProgram");
+
+/* Résout le titre de chaque programme référencé dans programs[]/
+   attestations[] d'une liste de volontaires, en une seule requête groupée
+   (pas un populate cross-connection). */
+const attachProgramTitles = async (volunteers) => {
+  const Program = getVolunteerProgramModel();
+  const ids = new Set();
+  volunteers.forEach((v) => {
+    (v.programs || []).forEach((p) => p.programId && ids.add(String(p.programId)));
+    (v.attestations || []).forEach((a) => a.programId && ids.add(String(a.programId)));
+  });
+  const titleById = new Map();
+  if (ids.size > 0) {
+    const programs = await Program.find({ _id: { $in: [...ids] } }).select("title");
+    programs.forEach((p) => titleById.set(String(p._id), p.title));
+  }
+
+  return volunteers.map((v) => {
+    const obj = v.toObject ? v.toObject() : v;
+    obj.programs = (obj.programs || []).map((p) => ({
+      ...p,
+      programTitle: titleById.get(String(p.programId)) || null,
+    }));
+    obj.attestations = (obj.attestations || []).map((a) => ({
+      ...a,
+      programTitle: a.programName || titleById.get(String(a.programId)) || null,
+    }));
+    return obj;
+  });
+};
 
 /* ---------------------- Créer ou mettre à jour un volontaire ---------------------- */
 const createOrUpdateVolunteer = async (req, res, next) => {
   try {
-    const { nom, prenom, email, telephone, statut, missions = [] } = req.body;
+    const { nom, prenom, email, telephone, statut, programs = [] } = req.body;
+    const Program = getVolunteerProgramModel();
 
     if (!email) return res.status(400).json({ message: "Email requis" });
 
-    // 🔹 Chercher un volontaire existant par email
     let volunteer = await Volunteer.findOne({ email });
 
-    // 🔹 Préparer les missions avec statut
-    const missionEntries = [];
-    for (const m of missions) {
-      const mission = await Mission.findById(m.missionId);
-      if (mission) {
-        missionEntries.push({
-          missionId: mission._id,
-          statut: m.statut || "Non disponible",
+    const programEntries = [];
+    for (const p of programs) {
+      const program = await Program.findById(p.programId);
+      if (program) {
+        programEntries.push({
+          programId: program._id,
+          statut: p.statut || "Non disponible",
         });
       }
     }
 
     if (!volunteer) {
-      // 🔹 Créer un nouveau volontaire
       volunteer = await Volunteer.create({
         nom,
         prenom,
         email,
         telephone,
         statut,
-        missions: missionEntries,
+        programs: programEntries,
       });
 
-      const populated = await Volunteer.findById(volunteer._id).populate(
-        "missions.missionId",
-        "titre"
-      );
-
+      const [populated] = await attachProgramTitles([volunteer]);
       return res.status(201).json({
         success: true,
         message: "Volontaire créé avec succès",
@@ -49,43 +81,35 @@ const createOrUpdateVolunteer = async (req, res, next) => {
       });
     }
 
-    // 🔹 Si le volontaire existe, mettre à jour les informations
     volunteer.nom = nom ?? volunteer.nom;
     volunteer.prenom = prenom ?? volunteer.prenom;
     volunteer.telephone = telephone ?? volunteer.telephone;
     volunteer.statut = statut ?? volunteer.statut;
 
-    // 🔹 Ajouter ou mettre à jour les missions
-    for (const m of missionEntries) {
-      const existing = volunteer.missions.find(
-        (vm) => vm.missionId.toString() === m.missionId.toString()
+    for (const p of programEntries) {
+      const existing = volunteer.programs.find(
+        (vp) => vp.programId.toString() === p.programId.toString()
       );
       if (existing) {
-        // Mettre à jour le statut si déjà existant
-        existing.statut = m.statut;
+        existing.statut = p.statut;
       } else {
-        // Ajouter nouvelle mission
-        volunteer.missions.push(m);
+        volunteer.programs.push(p);
       }
     }
 
     await volunteer.save();
 
-    const populated = await Volunteer.findById(volunteer._id).populate(
-      "missions.missionId",
-      "titre"
-    );
-
+    const [populated] = await attachProgramTitles([volunteer]);
     res.json({
       success: true,
-      message: "Volontaire mis à jour avec les missions",
+      message: "Volontaire mis à jour avec les programmes",
       volunteer: populated,
     });
   } catch (error) {
     if (error.code === 11000) {
       return res
         .status(400)
-        .json({ message: "Ce volontaire existe déjà pour cette mission." });
+        .json({ message: "Ce volontaire existe déjà pour ce programme." });
     }
     next(error);
   }
@@ -95,19 +119,20 @@ const createOrUpdateVolunteer = async (req, res, next) => {
 const fetchVolunteersForCertificate = async (req, res, next) => {
   try {
     const { titre, email } = req.body;
+    const Program = getVolunteerProgramModel();
 
-    const mission = await Mission.findOne({ titre });
-    if (!mission) {
-      return res.status(404).json({ success: false, message: "Mission non trouvée" });
+    const program = await Program.findOne({ title: titre });
+    if (!program) {
+      return res.status(404).json({ success: false, message: "Programme non trouvé" });
     }
 
     const volunteers = await Volunteer.find({
-      "missions.missionId": mission._id,
-      "missions.statut": "Mission validée",
+      "programs.programId": program._id,
+      "programs.statut": "Mission validée",
       ...(email && { email }),
-    }).populate("missions.missionId", "titre");
+    });
 
-    res.json({ success: true, volunteers });
+    res.json({ success: true, volunteers: await attachProgramTitles(volunteers) });
   } catch (error) {
     next(error);
   }
@@ -116,7 +141,8 @@ const fetchVolunteersForCertificate = async (req, res, next) => {
 /* ---------------------- Lister les volontaires ---------------------- */
 const listVolunteers = async (req, res, next) => {
   try {
-    const { search = "", statut, missionId, missionTitre, sort = "-createdAt" } = req.query;
+    const { search = "", statut, programId, programTitre, sort = "-createdAt" } = req.query;
+    const Program = getVolunteerProgramModel();
     const q = {};
 
     if (search) {
@@ -126,27 +152,28 @@ const listVolunteers = async (req, res, next) => {
 
     if (statut) q.statut = statut;
 
-    if (missionId && mongoose.isValidObjectId(missionId)) {
-      q["missions.missionId"] = missionId;
-    } else if (missionTitre) {
-      const m = await Mission.findOne({ titre: missionTitre }).select("_id");
-      if (m) q["missions.missionId"] = m._id;
+    if (programId && mongoose.isValidObjectId(programId)) {
+      q["programs.programId"] = programId;
+    } else if (programTitre) {
+      const p = await Program.findOne({ title: programTitre }).select("_id");
+      if (p) q["programs.programId"] = p._id;
     }
 
-    const items = await Volunteer.find(q).populate("missions.missionId", "titre").sort(sort);
+    const items = await Volunteer.find(q).sort(sort);
 
-    res.json({ success: true, total: items.length, items });
+    res.json({ success: true, total: items.length, items: await attachProgramTitles(items) });
   } catch (error) {
     next(error);
   }
 };
 
-/* ---------------------- Détail d’un volontaire ---------------------- */
+/* ---------------------- Détail d'un volontaire ---------------------- */
 const getVolunteerById = async (req, res, next) => {
   try {
-    const v = await Volunteer.findById(req.params.id).populate("missions.missionId", "titre");
+    const v = await Volunteer.findById(req.params.id);
     if (!v) return res.status(404).json({ message: "Volontaire non trouvé" });
-    res.json({ success: true, volunteer: v });
+    const [populated] = await attachProgramTitles([v]);
+    res.json({ success: true, volunteer: populated });
   } catch (error) {
     next(error);
   }
@@ -163,31 +190,31 @@ const deleteVolunteer = async (req, res, next) => {
   }
 };
 
-/* ---------------------- Attribuer des missions supplémentaires ---------------------- */
+/* ---------------------- Attribuer des programmes supplémentaires ---------------------- */
 const assignVolunteerMissions = async (req, res, next) => {
   try {
-    const { missions = [] } = req.body;
+    const { missions: programTitles = [] } = req.body;
+    const Program = getVolunteerProgramModel();
     const volunteer = await Volunteer.findById(req.params.id);
     if (!volunteer) return res.status(404).json({ message: "Volontaire non trouvé" });
 
-    const newMissionIds = [];
-    for (const titre of missions) {
-      const mission = await Mission.findOne({ titre });
-      if (mission && !volunteer.missions.find((m) => m.missionId.toString() === mission._id.toString())) {
-        newMissionIds.push({ missionId: mission._id });
+    const newEntries = [];
+    for (const titre of programTitles) {
+      const program = await Program.findOne({ title: titre });
+      if (program && !volunteer.programs.find((p) => p.programId.toString() === program._id.toString())) {
+        newEntries.push({ programId: program._id });
       }
     }
 
-    if (newMissionIds.length === 0) {
-      return res.status(400).json({ message: "Aucune nouvelle mission à attribuer" });
+    if (newEntries.length === 0) {
+      return res.status(400).json({ message: "Aucun nouveau programme à attribuer" });
     }
 
-    volunteer.missions = [...volunteer.missions, ...newMissionIds];
+    volunteer.programs = [...volunteer.programs, ...newEntries];
     await volunteer.save();
 
-    const populated = await Volunteer.findById(volunteer._id).populate("missions.missionId", "titre");
-
-    res.json({ success: true, volunteer: populated, message: "Missions attribuées" });
+    const [populated] = await attachProgramTitles([volunteer]);
+    res.json({ success: true, volunteer: populated, message: "Programmes attribués" });
   } catch (error) {
     next(error);
   }

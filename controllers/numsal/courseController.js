@@ -58,162 +58,18 @@ const DEFAULT_BUILTIN_FIELDS = [
     required: false, locked: false, options: [], validation: {}, conditional: { fieldId: "", values: [] },
   },
 ];
+const LOCKED_BUILTIN_FIELDS = DEFAULT_BUILTIN_FIELDS.filter((f) => f.locked);
 
-const LOCKED_FIELD_TYPES = { applicantName: "TEXT", applicantEmail: "EMAIL" };
-
-const ensureBuiltinFields = (fields) => {
-  const existingIds = new Set((fields || []).map((f) => f.id));
-  const missing = DEFAULT_BUILTIN_FIELDS.filter((f) => !existingIds.has(f.id));
-  return missing.length ? [...missing, ...(fields || [])] : fields || [];
-};
+const {
+  ensureBuiltinFields,
+  validateFormFieldsDefinition,
+  validateApplicationResponses,
+} = require("../../utils/applicationFormLogic");
 
 const canReviewCourse = (course, user) => {
   if (user.role === "ADMIN") return true;
   if (course.trainerId.toString() === user.id) return true;
   return (course.tutorIds || []).some((id) => id.toString() === user.id);
-};
-
-const CONDITIONAL_TRIGGER_TYPES = ["SELECT", "CHECKBOX"];
-
-/* Un champ conditionnel n'est visible que si son déclencheur (`fieldId`) est
-   lui-même visible ET a répondu une valeur incluse dans `values`. Chaîne sur
-   plusieurs niveaux ; `guard` protège contre une boucle de dépendance. */
-const isFieldVisible = (field, responses, fieldsById, guard = new Set()) => {
-  if (!field.conditional?.fieldId) return true;
-  if (guard.has(field.id)) return false;
-
-  const parent = fieldsById.get(field.conditional.fieldId);
-  if (!parent) return false; // déclencheur supprimé/introuvable : champ orphelin, jamais visible
-
-  guard.add(field.id);
-  if (!isFieldVisible(parent, responses, fieldsById, guard)) return false;
-
-  const rawParentValue = responses?.[parent.id];
-  const parentValueStr = typeof rawParentValue === "boolean" ? String(rawParentValue) : (rawParentValue ?? "");
-  return (field.conditional.values || []).includes(parentValueStr);
-};
-
-/* Valide la définition du formulaire elle-même (pas les réponses d'un
-   candidat) : ids uniques, pas d'auto-référence, déclencheur d'un type
-   autorisé, valeurs déclenchantes non vides, pas de boucle de dépendance. */
-const validateFormFieldsDefinition = (fields) => {
-  const ids = new Set();
-  for (const f of fields) {
-    if (!f.id || !f.label || !f.type) {
-      return "Chaque champ doit avoir un identifiant, un libellé et un type";
-    }
-    if (ids.has(f.id)) return `Identifiant de champ dupliqué : ${f.id}`;
-    ids.add(f.id);
-  }
-
-  for (const [lockedId, expectedType] of Object.entries(LOCKED_FIELD_TYPES)) {
-    const field = fields.find((f) => f.id === lockedId);
-    if (!field) {
-      return `Le champ "${lockedId === "applicantName" ? "Nom complet" : "Email"}" est indispensable et ne peut pas être supprimé`;
-    }
-    if (field.type !== expectedType) {
-      return `Le type du champ "${field.label}" ne peut pas être modifié`;
-    }
-    if (!field.required) {
-      return `Le champ "${field.label}" doit rester obligatoire`;
-    }
-    if (field.conditional?.fieldId) {
-      return `Le champ "${field.label}" doit toujours rester visible (pas de condition d'affichage)`;
-    }
-  }
-
-  const byId = new Map(fields.map((f) => [f.id, f]));
-  const indexById = new Map(fields.map((f, idx) => [f.id, idx]));
-
-  for (let i = 0; i < fields.length; i++) {
-    const f = fields[i];
-    if (!f.conditional?.fieldId) continue;
-
-    if (f.conditional.fieldId === f.id) {
-      return `Le champ "${f.label}" ne peut pas dépendre de lui-même`;
-    }
-
-    const parent = byId.get(f.conditional.fieldId);
-    if (!parent) {
-      return `Le champ "${f.label}" dépend d'un champ introuvable`;
-    }
-    if (!CONDITIONAL_TRIGGER_TYPES.includes(parent.type)) {
-      return `Le champ "${f.label}" ne peut dépendre que d'une liste déroulante ou d'une case à cocher`;
-    }
-    if (!Array.isArray(f.conditional.values) || f.conditional.values.length === 0) {
-      return `Le champ "${f.label}" doit préciser au moins une valeur déclenchante`;
-    }
-
-    // Le déclencheur doit toujours apparaître avant son sous-champ dans le
-    // formulaire (sinon le candidat verrait la question dérivée avant la
-    // question qui la déclenche) — cette contrainte de position empêche
-    // aussi structurellement toute boucle de dépendance.
-    if (indexById.get(f.conditional.fieldId) >= i) {
-      return `Le champ "${f.label}" doit être placé après « ${parent.label} » dans le formulaire`;
-    }
-  }
-
-  return null;
-};
-
-/* `responses` doit ici déjà inclure applicantName/applicantEmail/
-   applicantPhone fusionnés (voir applyToCourse) — ces trois champs sont
-   envoyés en paramètres de premier niveau par l'assistant candidat, pas
-   dans son objet `responses` brut, qu'ils soient verrouillés ou non. */
-const validateApplicationResponses = (fields, responses) => {
-  const fieldsById = new Map(fields.map((f) => [f.id, f]));
-
-  for (const field of fields) {
-    if (!isFieldVisible(field, responses, fieldsById)) continue;
-
-    const value = responses?.[field.id];
-    const isEmpty = value === undefined || value === null || value === "";
-
-    if (field.required && isEmpty) {
-      return `Le champ "${field.label}" est requis`;
-    }
-    if (isEmpty) continue;
-
-    const v = field.validation || {};
-
-    if (["TEXT", "TEXTAREA", "EMAIL", "PHONE"].includes(field.type)) {
-      const str = String(value);
-      if (v.minLength && str.length < v.minLength) {
-        return `"${field.label}" doit contenir au moins ${v.minLength} caractères`;
-      }
-      if (v.maxLength && str.length > v.maxLength) {
-        return `"${field.label}" doit contenir au plus ${v.maxLength} caractères`;
-      }
-      if (v.pattern) {
-        try {
-          if (!new RegExp(v.pattern).test(str)) {
-            return `"${field.label}" ne respecte pas le format attendu`;
-          }
-        } catch {
-          // pattern invalide côté formateur : ignoré plutôt que de bloquer le candidat
-        }
-      }
-      if (field.type === "EMAIL" && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(str)) {
-        return `"${field.label}" doit être un email valide`;
-      }
-    }
-
-    if (field.type === "NUMBER") {
-      const num = Number(value);
-      if (Number.isNaN(num)) return `"${field.label}" doit être un nombre`;
-      if (v.min !== null && v.min !== undefined && num < v.min) {
-        return `"${field.label}" doit être supérieur ou égal à ${v.min}`;
-      }
-      if (v.max !== null && v.max !== undefined && num > v.max) {
-        return `"${field.label}" doit être inférieur ou égal à ${v.max}`;
-      }
-    }
-
-    if (field.type === "SELECT" && field.options?.length && !field.options.includes(value)) {
-      return `"${field.label}" doit être une des valeurs proposées`;
-    }
-  }
-  return null;
 };
 
 const validateLessonPayload = (lesson) => {
@@ -293,7 +149,7 @@ exports.getCourseById = async (req, res, next) => {
     const courseObj = course.toObject();
     courseObj.applicationForm = {
       ...courseObj.applicationForm,
-      fields: ensureBuiltinFields(courseObj.applicationForm?.fields),
+      fields: ensureBuiltinFields(courseObj.applicationForm?.fields, DEFAULT_BUILTIN_FIELDS),
     };
 
     res.json(courseObj);
@@ -431,7 +287,7 @@ exports.updateCourseMeta = async (req, res, next) => {
       course.applicationForm.estimatedDuration = estimatedDuration;
     }
     if (Array.isArray(applicationFormFields)) {
-      const defError = validateFormFieldsDefinition(applicationFormFields);
+      const defError = validateFormFieldsDefinition(applicationFormFields, LOCKED_BUILTIN_FIELDS);
       if (defError) return res.status(400).json({ message: defError });
       course.applicationForm.fields = applicationFormFields;
     }
@@ -592,7 +448,7 @@ exports.getApplicationForm = async (req, res, next) => {
       applicationDeadline: course.applicationDeadline,
       brandColor: course.brandColor || "",
       estimatedDuration: course.applicationForm?.estimatedDuration || "",
-      fields: ensureBuiltinFields(course.applicationForm?.fields),
+      fields: ensureBuiltinFields(course.applicationForm?.fields, DEFAULT_BUILTIN_FIELDS),
     });
   } catch (error) {
     next(error);

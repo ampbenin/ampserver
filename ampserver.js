@@ -59,6 +59,13 @@ app.use(cors({
 app.use("/api/volunteers", volunteerRoutes);
 app.use("/api/missions", missionRoutes);
 app.use("/api/certificates", certificateRoutes);
+// Nouveau système de programmes de volontariat (façon NumSAL) — remplace à
+// terme /api/missions + /api/volunteer-form + /admin/volunteers, montés en
+// parallèle pour l'instant le temps de valider la bascule (voir le plan de
+// migration).
+app.use("/api/volunteer-programs", require("./routes/volunteerProgramRoute"));
+app.use("/api/volunteer-applications", require("./routes/volunteerApplicationRoute"));
+app.use("/api/volunteer-form-templates", require("./routes/volunteerFormTemplateRoute"));
 app.use("/api/newsletter", newsletterRoutes);
 app.use("/api/contact", contactRoutes);
 app.use("/api/volunteer-form", volunteerFormRoutes);

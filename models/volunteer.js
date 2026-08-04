@@ -17,10 +17,18 @@ const VolunteerSchema = new mongoose.Schema(
       default: "Non disponible",
     },
 
-    // ✅ Tableau des missions pour gérer plusieurs missions
-    missions: [
+    // ✅ Tableau des programmes pour gérer plusieurs programmes de
+    // volontariat. `programId` référence VolunteerProgram — une référence
+    // inter-connexion (Volunteer vit sur la connexion par défaut,
+    // VolunteerProgram sur formDB), même limite déjà acceptée aujourd'hui
+    // pour VolunteerForm.handledBy → GestionAmpUser : pas de .populate()
+    // automatique, il faut résoudre le nom du programme séparément si
+    // besoin. Alimenté automatiquement à l'acceptation d'une candidature
+    // (voir volunteerApplicationController.acceptApplication), plus
+    // manuellement via SaveVolunteers.jsx.
+    programs: [
       {
-        missionId: { type: mongoose.Schema.Types.ObjectId, ref: "Mission", required: true },
+        programId: { type: mongoose.Schema.Types.ObjectId, required: true },
         statut: {
           type: String,
           enum: ["Non disponible", "Refusé", "Mission validée"],
@@ -33,8 +41,8 @@ const VolunteerSchema = new mongoose.Schema(
     // ✅ Stockage cloud des attestations
     attestations: [
       {
-        missionId: { type: mongoose.Schema.Types.ObjectId, ref: "Mission", required: true },
-        missionName: { type: String },
+        programId: { type: mongoose.Schema.Types.ObjectId, required: true },
+        programName: { type: String },
         fileName: { type: String },
         fileUrl: { type: String },
         statut: {
