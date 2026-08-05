@@ -9,10 +9,39 @@ const streamifier = require("streamifier");
 const cloudinary = require("../utils/cloudinary");
 const getVolunteerProgramModel = require("../models/volunteerProgram");
 const getVolunteerTaskSubmissionModel = require("../models/volunteerTaskSubmission");
+const getUserModel = require("../models/gestionamp/User");
 const Volunteer = require("../models/volunteer");
 const { canReviewProgram } = require("./volunteerProgramController");
 const { getDueOccurrences, computeProgress, startOfDay } = require("../utils/volunteerTaskLogic");
 const { validateApplicationResponses } = require("../utils/applicationFormLogic");
+
+/* -------------------- Interne : sous-ensemble de volontaires supervisés -------------------- */
+/* Un SUPERVISEUR ne suit jamais tout un programme automatiquement — juste
+   le sous-ensemble précis de volontaires qui lui a été affecté pour CE
+   programme (GestionAmpUser.supervisedAssignments, jamais lu depuis le
+   payload JWT — toujours rechargé frais depuis la base). Retourne `null`
+   si l'utilisateur n'est pas SUPERVISEUR ou n'a aucune affectation sur ce
+   programme. */
+async function getSupervisorAssignment(user, programId) {
+  if (user.role !== "SUPERVISEUR") return null;
+  const User = getUserModel();
+  const fullUser = await User.findById(user.id).select("supervisedAssignments");
+  const assignment = (fullUser?.supervisedAssignments || []).find(
+    (a) => a.programId.toString() === programId.toString()
+  );
+  return assignment || null;
+}
+
+/* -------------------- Interne : autorisation de suivi de tâches pour UN volontaire précis -------------------- */
+/* Séparée de canReviewProgram (candidatures) à dessein : un SUPERVISEUR ne
+   doit jamais hériter de droits sur les candidatures, uniquement sur le
+   suivi de tâches de ses volontaires affectés. */
+async function canSuperviseVolunteer(program, volunteerId, user) {
+  if (canReviewProgram(program, user)) return true; // ADMIN/EDITOR/reviewer de candidature (mécanisme existant, inchangé)
+  const assignment = await getSupervisorAssignment(user, program._id);
+  if (!assignment) return false;
+  return assignment.volunteerIds.some((id) => id.toString() === volunteerId.toString());
+}
 
 // Repli utilisé quand une tâche n'a aucun champ de preuve configuré (tâches
 // créées avant ce chantier, ou staff n'ayant pas encore personnalisé) — un
@@ -189,13 +218,22 @@ exports.listSubmissions = async (req, res, next) => {
     const Program = getVolunteerProgramModel();
     const program = await Program.findById(programId);
     if (!program) return res.status(404).json({ message: "Programme introuvable" });
+
+    const query = { programId };
+    if (status) query.status = status;
+
     if (!canReviewProgram(program, req.user)) {
-      return res.status(403).json({ message: "Vous n'êtes pas autorisé à consulter ce programme" });
+      // Pas ADMIN/EDITOR/reviewer de candidature : seul un SUPERVISEUR
+      // affecté à ce programme peut continuer, et seulement sur SES
+      // volontaires affectés (jamais tout le programme).
+      const assignment = await getSupervisorAssignment(req.user, program._id);
+      if (!assignment) {
+        return res.status(403).json({ message: "Vous n'êtes pas autorisé à consulter ce programme" });
+      }
+      query.volunteerId = { $in: assignment.volunteerIds };
     }
 
     const Submission = getVolunteerTaskSubmissionModel();
-    const query = { programId };
-    if (status) query.status = status;
     const submissions = await Submission.find(query).sort({ submittedAt: -1 }).lean();
 
     const volunteerIds = [...new Set(submissions.map((s) => String(s.volunteerId)))];
@@ -236,14 +274,19 @@ async function reviewSubmission(req, res, next, newStatus) {
     const Program = getVolunteerProgramModel();
     const program = await Program.findById(submission.programId);
     if (!program) return res.status(404).json({ message: "Programme introuvable" });
-    if (!canReviewProgram(program, req.user)) {
-      return res.status(403).json({ message: "Vous n'êtes pas autorisé à évaluer ce programme" });
+    if (!(await canSuperviseVolunteer(program, submission.volunteerId, req.user))) {
+      return res.status(403).json({ message: "Vous n'êtes pas autorisé à évaluer cette soumission" });
+    }
+
+    const reviewNote = req.body?.reviewNote?.trim() || "";
+    if (newStatus === "REJECTED" && !reviewNote) {
+      return res.status(400).json({ message: "Une observation expliquant le motif du rejet est requise" });
     }
 
     submission.status = newStatus;
     submission.reviewedBy = req.user.id;
     submission.reviewedAt = new Date();
-    submission.reviewNote = req.body?.reviewNote || "";
+    submission.reviewNote = reviewNote;
     await submission.save();
 
     if (newStatus === "APPROVED") {
@@ -266,11 +309,18 @@ exports.listProgramProgress = async (req, res, next) => {
     const Program = getVolunteerProgramModel();
     const program = await Program.findById(programId).select("title tasks missionValidationThreshold endDate reviewerIds");
     if (!program) return res.status(404).json({ message: "Programme introuvable" });
+
+    const volunteerQuery = { "programs.programId": programId };
+
     if (!canReviewProgram(program, req.user)) {
-      return res.status(403).json({ message: "Vous n'êtes pas autorisé à consulter ce programme" });
+      const assignment = await getSupervisorAssignment(req.user, program._id);
+      if (!assignment) {
+        return res.status(403).json({ message: "Vous n'êtes pas autorisé à consulter ce programme" });
+      }
+      volunteerQuery._id = { $in: assignment.volunteerIds };
     }
 
-    const volunteers = await Volunteer.find({ "programs.programId": programId }).select("nom prenom email programs");
+    const volunteers = await Volunteer.find(volunteerQuery).select("nom prenom email programs");
 
     const Submission = getVolunteerTaskSubmissionModel();
     const allSubmissions = await Submission.find({ programId }).lean();
@@ -300,3 +350,7 @@ exports.listProgramProgress = async (req, res, next) => {
     next(error);
   }
 };
+
+// Réutilisés par controllers/volunteerProgramPartnerController.js.
+exports.getEffectiveProofFields = getEffectiveProofFields;
+exports.DEFAULT_PROOF_FIELDS = DEFAULT_PROOF_FIELDS;

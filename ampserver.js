@@ -69,6 +69,8 @@ app.use("/api/volunteer-form-templates", require("./routes/volunteerFormTemplate
 app.use("/api/volunteer-auth", require("./routes/volunteerAuthRoute"));
 // Suivi des tâches de mission par programme (soumissions + modération).
 app.use("/api/volunteer-tasks", require("./routes/volunteerTaskRoute"));
+// Compte partenaire (statistiques/impact en lecture seule + commentaires).
+app.use("/api/volunteer-partner", require("./routes/volunteerProgramPartnerRoute"));
 app.use("/api/newsletter", newsletterRoutes);
 app.use("/api/contact", contactRoutes);
 app.use("/api/partner-form", partnerRoutes);

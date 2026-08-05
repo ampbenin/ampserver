@@ -24,7 +24,7 @@ const UserSchema = new mongoose.Schema(
 
     role: {
       type: String,
-      enum: ["ADMIN", "EDITOR", "EC", "IS"],
+      enum: ["ADMIN", "EDITOR", "EC", "IS", "SUPERVISEUR", "PARTENAIRE"],
       required: true,
     },
 
@@ -39,6 +39,26 @@ const UserSchema = new mongoose.Schema(
       ref: "GestionAmpInstitutionSpecialisee",
       default: null,
     },
+
+    // Pertinent seulement si role === "SUPERVISEUR" : un superviseur ne
+    // suit jamais tout un programme automatiquement, seulement le
+    // sous-ensemble précis de volontaires qu'on lui affecte ici, programme
+    // par programme (voir controllers/volunteerProgramController.js).
+    // `volunteerIds` référence Volunteer, qui vit sur la connexion par
+    // défaut — référence inter-connexion, même limite déjà acceptée
+    // partout ailleurs dans ce chantier (pas de populate).
+    supervisedAssignments: [
+      {
+        _id: false,
+        programId: { type: mongoose.Schema.Types.ObjectId, ref: "VolunteerProgram", required: true },
+        volunteerIds: [{ type: mongoose.Schema.Types.ObjectId, required: true }],
+      },
+    ],
+
+    // Pertinent seulement si role === "PARTENAIRE" : programmes suivis en
+    // lecture seule (statistiques, volontaires à mission validée,
+    // commentaires) — voir controllers/volunteerProgramPartnerController.js.
+    partnerProgramIds: [{ type: mongoose.Schema.Types.ObjectId, ref: "VolunteerProgram", default: [] }],
 
     mustChangePassword: { type: Boolean, default: true },
 

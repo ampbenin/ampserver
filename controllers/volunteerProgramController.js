@@ -10,6 +10,7 @@
 
 const getVolunteerProgramModel = require("../models/volunteerProgram");
 const getVolunteerApplicationModel = require("../models/volunteerApplication");
+const getUserModel = require("../models/gestionamp/User");
 const { ensureBuiltinFields, validateFormFieldsDefinition } = require("../utils/applicationFormLogic");
 
 // Format hex strict (#RRGGBB) — cette valeur est réinjectée telle quelle dans
@@ -245,6 +246,76 @@ exports.deleteProgram = async (req, res, next) => {
 
     await program.deleteOne();
     res.json({ success: true, message: "Programme supprimé" });
+  } catch (error) {
+    next(error);
+  }
+};
+
+/* -------------------- ADMIN/EDITOR : affecter un superviseur à ce programme -------------------- */
+/* Un SUPERVISEUR ne suit jamais tout un programme automatiquement : on lui
+   affecte ici un sous-ensemble précis de volontaires de CE programme
+   (remplace l'affectation existante pour ce programme s'il y en avait déjà
+   une). volunteerIds vides = retire le superviseur de ce programme. */
+exports.setSupervisorAssignment = async (req, res, next) => {
+  try {
+    const { supervisorId, volunteerIds } = req.body;
+    if (!supervisorId || !Array.isArray(volunteerIds)) {
+      return res.status(400).json({ message: "supervisorId et volunteerIds (tableau) requis" });
+    }
+
+    const Program = getVolunteerProgramModel();
+    const program = await Program.findById(req.params.id);
+    if (!program) return res.status(404).json({ message: "Programme introuvable" });
+
+    const User = getUserModel();
+    const supervisor = await User.findById(supervisorId);
+    if (!supervisor) return res.status(404).json({ message: "Superviseur introuvable" });
+    if (supervisor.role !== "SUPERVISEUR") {
+      return res.status(400).json({ message: "Ce compte n'a pas le rôle SUPERVISEUR" });
+    }
+
+    const others = supervisor.supervisedAssignments.filter(
+      (a) => a.programId.toString() !== program._id.toString()
+    );
+    supervisor.supervisedAssignments = volunteerIds.length > 0
+      ? [...others, { programId: program._id, volunteerIds }]
+      : others;
+    await supervisor.save();
+
+    res.json({ message: "Affectation enregistrée", supervisedAssignments: supervisor.supervisedAssignments });
+  } catch (error) {
+    next(error);
+  }
+};
+
+/* -------------------- ADMIN/EDITOR : ajouter/retirer un partenaire de ce programme -------------------- */
+exports.setPartnerAccess = async (req, res, next) => {
+  try {
+    const { partnerId, action } = req.body;
+    if (!partnerId || !["add", "remove"].includes(action)) {
+      return res.status(400).json({ message: 'partnerId et action ("add"|"remove") requis' });
+    }
+
+    const Program = getVolunteerProgramModel();
+    const program = await Program.findById(req.params.id);
+    if (!program) return res.status(404).json({ message: "Programme introuvable" });
+
+    const User = getUserModel();
+    const partner = await User.findById(partnerId);
+    if (!partner) return res.status(404).json({ message: "Partenaire introuvable" });
+    if (partner.role !== "PARTENAIRE") {
+      return res.status(400).json({ message: "Ce compte n'a pas le rôle PARTENAIRE" });
+    }
+
+    const already = partner.partnerProgramIds.some((id) => id.toString() === program._id.toString());
+    if (action === "add" && !already) {
+      partner.partnerProgramIds.push(program._id);
+    } else if (action === "remove" && already) {
+      partner.partnerProgramIds = partner.partnerProgramIds.filter((id) => id.toString() !== program._id.toString());
+    }
+    await partner.save();
+
+    res.json({ message: "Accès partenaire mis à jour", partnerProgramIds: partner.partnerProgramIds });
   } catch (error) {
     next(error);
   }

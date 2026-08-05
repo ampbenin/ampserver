@@ -18,5 +18,7 @@ router.post("/", ...requireStaff, ctrl.createProgram);
 router.get("/:id", ...requireStaff, ctrl.getProgramById);
 router.put("/:id", ...requireStaff, ctrl.updateProgramMeta);
 router.delete("/:id", ...requireStaff, ctrl.deleteProgram);
+router.patch("/:id/supervisors", ...requireStaff, ctrl.setSupervisorAssignment);
+router.patch("/:id/partners", ...requireStaff, ctrl.setPartnerAccess);
 
 module.exports = router;

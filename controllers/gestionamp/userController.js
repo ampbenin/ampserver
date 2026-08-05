@@ -22,9 +22,9 @@ exports.createUser = async (req, res) => {
     } = req.body;
 
     // Vérification du rôle autorisé
-    if (!["EC", "IS", "EDITOR"].includes(role)) {
+    if (!["EC", "IS", "EDITOR", "SUPERVISEUR", "PARTENAIRE"].includes(role)) {
       return res.status(400).json({
-        message: "Seuls les rôles EC, IS et EDITOR peuvent être créés",
+        message: "Seuls les rôles EC, IS, EDITOR, SUPERVISEUR et PARTENAIRE peuvent être créés",
       });
     }
 
@@ -41,11 +41,29 @@ exports.createUser = async (req, res) => {
       });
     }
 
-    // Vérifier l'unicité de l'email
+    // Si l'email a déjà un compte : on ne crée pas de doublon, on renomme
+    // simplement ce compte existant avec le nouveau rôle (cas d'usage
+    // demandé : "on le nomme SUPERVISEUR/PARTENAIRE, pas besoin d'un autre
+    // compte"). Garde-fou : jamais de rétrogradation silencieuse d'un
+    // compte ADMIN via ce formulaire — geste trop sensible pour être
+    // implicite, à faire à la main si vraiment voulu.
     const existingUser = await User.findOne({ email });
     if (existingUser) {
-      return res.status(409).json({
-        message: "Un utilisateur avec cet email existe déjà",
+      if (existingUser.role === "ADMIN") {
+        return res.status(409).json({
+          message: "Ce compte est déjà ADMIN — changez son rôle manuellement si c'est vraiment voulu.",
+        });
+      }
+
+      existingUser.role = role;
+      if (name) existingUser.name = name;
+      existingUser.coordinationCommunaleId = role === "EC" ? coordinationCommunaleId : null;
+      existingUser.institutionSpecialiseeId = role === "IS" ? institutionSpecialiseeId : null;
+      await existingUser.save();
+
+      return res.status(200).json({
+        message: `Compte existant renommé ${role} avec succès (aucun nouveau compte créé).`,
+        user: { id: existingUser._id, name: existingUser.name, email: existingUser.email, role: existingUser.role },
       });
     }
 
