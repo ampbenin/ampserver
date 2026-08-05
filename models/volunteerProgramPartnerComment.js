@@ -13,6 +13,12 @@ const VolunteerProgramPartnerCommentSchema = new mongoose.Schema(
     programId: { type: mongoose.Schema.Types.ObjectId, ref: "VolunteerProgram", required: true },
     partnerId: { type: mongoose.Schema.Types.ObjectId, ref: "GestionAmpUser", required: true },
     text: { type: String, required: true, trim: true },
+
+    // Réponse de l'équipe (ADMIN/EDITOR uniquement, voir replyToComment) — un
+    // seul niveau de réponse par commentaire, pas un fil de discussion complet.
+    reply: { type: String, default: null },
+    repliedAt: { type: Date, default: null },
+    repliedBy: { type: mongoose.Schema.Types.ObjectId, ref: "GestionAmpUser", default: null },
   },
   { timestamps: true }
 );

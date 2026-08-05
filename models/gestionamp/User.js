@@ -60,6 +60,10 @@ const UserSchema = new mongoose.Schema(
     // commentaires) — voir controllers/volunteerProgramPartnerController.js.
     partnerProgramIds: [{ type: mongoose.Schema.Types.ObjectId, ref: "VolunteerProgram", default: [] }],
 
+    // Logo uploadé en self-service par le partenaire lui-même (co-branding de
+    // son dashboard) — pertinent seulement si role === "PARTENAIRE".
+    partnerLogoUrl: { type: String, default: null },
+
     mustChangePassword: { type: Boolean, default: true },
 
     isActive: { type: Boolean, default: true },
