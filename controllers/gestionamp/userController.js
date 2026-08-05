@@ -4,6 +4,8 @@
  */
 
 const getUserModel = require("../../models/gestionamp/User");
+const getCoordinationCommunaleModel = require("../../models/gestionamp/CoordinationCommunale");
+const getInstitutionSpecialiseeModel = require("../../models/gestionamp/InstitutionSpecialisee");
 
 /**
  * @route POST /gestionamp/api/users
@@ -102,6 +104,12 @@ exports.createUser = async (req, res) => {
 exports.getAllUsers = async (req, res) => {
   try {
     const User = getUserModel();
+    // Voir authController.js#me : .populate() plante en 500 si ces modèles
+    // "lazy" n'ont jamais été enregistrés — garanti ici plutôt que de
+    // dépendre par coïncidence d'un autre appel fait avant (coordinations/
+    // institutions) côté frontend.
+    getCoordinationCommunaleModel();
+    getInstitutionSpecialiseeModel();
     const users = await User.find()
       .populate("coordinationCommunaleId", "name commune")
       .populate("institutionSpecialiseeId", "name domaine")

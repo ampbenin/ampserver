@@ -8,6 +8,10 @@ const { authLimiter } = require("../../config/rateLimit");
 // 🔐 Connexion
 router.post("/login", authLimiter, authController.login);
 
+// 🔐 Profil courant (utilisé par useAuthAMP.js — endpoint manquant jusqu'ici,
+// ce qui faisait échouer systématiquement la garde d'accès des dashboards)
+router.get("/me", authMiddleware, authController.me);
+
 // 🔐 Changement de mot de passe (protégé — accessible même si mustChangePassword=true)
 router.post("/change-password", authMiddleware, authController.changePassword);
 

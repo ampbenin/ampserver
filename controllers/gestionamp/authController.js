@@ -8,6 +8,8 @@
 const jwt = require("jsonwebtoken");
 const crypto = require("crypto");
 const getUserModel = require("../../models/gestionamp/User");
+const getCoordinationCommunaleModel = require("../../models/gestionamp/CoordinationCommunale");
+const getInstitutionSpecialiseeModel = require("../../models/gestionamp/InstitutionSpecialisee");
 const jwtConfig = require("../../config/jwt");
 const resend = require("../../utils/resendMailer");
 
@@ -68,6 +70,38 @@ exports.login = async (req, res) => {
   } catch (error) {
     console.error("❌ Erreur login:", error.message);
     return res.status(500).json({ message: "Erreur serveur" });
+  }
+};
+
+/**
+ * @route GET /gestionamp/api/auth/me
+ * Protégée par authMiddleware. Utilisée par useAuthAMP.js (garde d'accès
+ * des dashboards ADMIN/EC/IS) pour revalider le rôle depuis la base plutôt
+ * que de faire confiance au seul contenu du JWT côté client.
+ */
+exports.me = async (req, res) => {
+  try {
+    const User = getUserModel();
+    // Ces modèles sont des factories "lazy" (voir models/gestionamp/*.js) :
+    // sans cet appel préalable, .populate() plante en 500 ("Schema hasn't
+    // been registered...") si /me est le tout premier appel du process à
+    // les référencer — repéré en testant cet endpoint juste après un boot.
+    getCoordinationCommunaleModel();
+    getInstitutionSpecialiseeModel();
+
+    const user = await User.findById(req.user.id)
+      .select("-password -passwordResetTokenHash -passwordResetExpires")
+      .populate("coordinationCommunaleId", "name commune")
+      .populate("institutionSpecialiseeId", "name domaine");
+
+    if (!user) {
+      return res.status(404).json({ message: "Utilisateur introuvable" });
+    }
+
+    res.json(user);
+  } catch (error) {
+    console.error("❌ Erreur me:", error.message);
+    res.status(500).json({ message: "Erreur serveur" });
   }
 };
 
