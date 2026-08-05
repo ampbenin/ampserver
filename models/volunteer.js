@@ -1,6 +1,7 @@
 // models/volunteer.js
 
 const mongoose = require("mongoose");
+const bcrypt = require("bcryptjs");
 
 const VolunteerSchema = new mongoose.Schema(
   {
@@ -8,8 +9,26 @@ const VolunteerSchema = new mongoose.Schema(
     prenom: { type: String, required: true, trim: true },
     fullName: { type: String, trim: true }, // généré automatiquement
 
-    email: { type: String, required: true, trim: true },
+    // lowercase ajouté avec les champs de compte ci-dessous, pour être
+    // cohérent avec GestionAmpUser/NumsalUser/VolunteerApplication.applicantEmail
+    // (déjà lowercase) — évite les doublons "Jean@x.com" / "jean@x.com".
+    email: { type: String, required: true, trim: true, lowercase: true },
     telephone: { type: String },
+
+    // ✅ Compte "Mon espace" — ce document EST le compte, pas une collection
+    // séparée (contrairement à NumsalUser) : un profil Volunteer existe déjà
+    // souvent avant tout compte (créé par le staff ou à l'acceptation d'une
+    // candidature), donc "créer un compte" = ajouter un mot de passe à la
+    // fiche existante trouvée par email, jamais une fiche en doublon. `null`
+    // = compte pas encore activé (candidat/volontaire connu mais qui ne
+    // s'est jamais connecté). Jamais de mot de passe en clair envoyé par
+    // email : toujours défini via un lien à usage unique (voir
+    // controllers/volunteerAuthController.js), d'où l'absence d'un flag
+    // mustChangePassword ici (inutile avec ce mécanisme).
+    password: { type: String, default: null },
+    isActive: { type: Boolean, default: true },
+    passwordResetTokenHash: { type: String, default: null },
+    passwordResetExpires: { type: Date, default: null },
 
     statut: {
       type: String,
@@ -62,6 +81,23 @@ VolunteerSchema.pre("save", function (next) {
   this.fullName = `${this.nom} ${this.prenom}`;
   next();
 });
+
+// Hash du mot de passe (seulement s'il vient d'être défini/modifié)
+VolunteerSchema.pre("save", async function (next) {
+  if (!this.isModified("password") || !this.password) return next();
+  try {
+    const salt = await bcrypt.genSalt(10);
+    this.password = await bcrypt.hash(this.password, salt);
+    next();
+  } catch (err) {
+    next(err);
+  }
+});
+
+VolunteerSchema.methods.comparePassword = function (candidatePassword) {
+  if (!this.password) return Promise.resolve(false);
+  return bcrypt.compare(candidatePassword, this.password);
+};
 
 // Recalcule fullName sur findOneAndUpdate
 VolunteerSchema.pre("findOneAndUpdate", async function (next) {

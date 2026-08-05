@@ -16,6 +16,9 @@ const resend = require("../utils/resendMailer");
 const { renderBrandedEmail, renderContactBlockText, escapeHtml } = require("../utils/emailTemplates");
 const { closeExpiredPrograms, canReviewProgram, DEFAULT_BUILTIN_FIELDS } = require("./volunteerProgramController");
 const { validateApplicationResponses } = require("../utils/applicationFormLogic");
+const { generateSetPasswordUrl } = require("./volunteerAuthController");
+
+const FRONTEND_BASE = process.env.FRONTEND_URL || "https://ampbenin.netlify.app";
 
 // Fixé en dur (pas de process.env.RESEND_FROM_EMAIL) : cette variable est
 // partagée avec NumSAL (controllers/numsal/*.js) et réglée côté serveur sur
@@ -155,6 +158,34 @@ exports.listApplications = async (req, res, next) => {
   }
 };
 
+/* -------------------- Protégé (Mon espace) : mes candidatures -------------------- */
+exports.listMyApplications = async (req, res, next) => {
+  try {
+    const Application = getVolunteerApplicationModel();
+    const applications = await Application.find({ applicantEmail: req.user.email }).sort({ createdAt: -1 });
+
+    // Résolution manuelle des titres de programme (VolunteerProgram vit sur
+    // formDB, VolunteerApplication aussi en fait — mais on reste cohérent
+    // avec le pattern déjà utilisé ailleurs dans ce contrôleur/volunteerController.js).
+    const Program = getVolunteerProgramModel();
+    const programIds = [...new Set(applications.map((a) => a.programId).filter(Boolean).map(String))];
+    const programs = programIds.length > 0
+      ? await Program.find({ _id: { $in: programIds } }).select("title")
+      : [];
+    const titleById = new Map(programs.map((p) => [String(p._id), p.title]));
+
+    const items = applications.map((a) => {
+      const obj = a.toObject();
+      obj.programTitle = a.programId ? titleById.get(String(a.programId)) || null : null;
+      return obj;
+    });
+
+    res.json({ items });
+  } catch (error) {
+    next(error);
+  }
+};
+
 /* -------------------- Staff : accepter une candidature -------------------- */
 exports.acceptApplication = async (req, res, next) => {
   try {
@@ -224,6 +255,14 @@ exports.rejectApplication = async (req, res, next) => {
    (programme en accès ouvert). */
 async function finalizeAcceptance(application, program, reviewerId) {
   let volunteer = await Volunteer.findOne({ email: application.applicantEmail });
+  // "Mon espace" (voir volunteerAuthController.js) : le compte EST ce
+  // document Volunteer. Pas encore de mot de passe = pas encore de compte
+  // actif, que la fiche vienne d'être créée ici ou qu'elle existait déjà
+  // (ex. ajoutée à la main par le staff) — dans les deux cas on inclut un
+  // lien d'activation dans l'email d'acceptation ci-dessous, jamais un
+  // email séparé ni un mot de passe en clair.
+  const needsActivationLink = !volunteer || !volunteer.password;
+
   if (!volunteer) {
     volunteer = await Volunteer.create({
       nom: application.applicantLastName,
@@ -247,7 +286,8 @@ async function finalizeAcceptance(application, program, reviewerId) {
   application.volunteerId = volunteer._id;
   await application.save();
 
-  await sendAcceptedEmail(application, program);
+  const setPasswordUrl = needsActivationLink ? await generateSetPasswordUrl(volunteer) : null;
+  await sendAcceptedEmail(application, program, setPasswordUrl);
   return volunteer;
 }
 
@@ -290,8 +330,18 @@ async function sendReceivedEmail(application, program) {
   }
 }
 
-async function sendAcceptedEmail(application, program) {
+/* `setPasswordUrl` : présent seulement si le volontaire n'a pas encore de
+   compte actif — inclut alors un lien d'activation directement dans cet
+   email (pas d'email séparé). Sinon, un simple lien vers la connexion. */
+async function sendAcceptedEmail(application, program, setPasswordUrl) {
   const name = fullName(application);
+  const loginUrl = `${FRONTEND_BASE}/mon-espace/login`;
+  const spaceCtaText = setPasswordUrl
+    ? "Votre espace volontaire est prêt : cliquez ci-dessous pour choisir votre mot de passe et suivre vos candidatures, vos missions et vos attestations."
+    : "Retrouvez le suivi de vos candidatures, vos missions et vos attestations dans votre espace volontaire.";
+  const spaceCtaUrl = setPasswordUrl || loginUrl;
+  const spaceCtaLabel = setPasswordUrl ? "Activer mon espace volontaire" : "Voir mon espace volontaire";
+
   try {
     await resend.emails.send({
       from: RESEND_FROM,
@@ -305,6 +355,9 @@ async function sendAcceptedEmail(application, program) {
           : `Merci pour votre engagement, votre profil rejoint notre fichier de volontaires.`,
         program?.admissionInstructions ? `\n${program.admissionInstructions}\n` : "",
         `Notre équipe pourra vous recontacter pour la suite.`,
+        ``,
+        spaceCtaText,
+        spaceCtaUrl,
         renderContactBlockText(program || {}),
       ].filter(Boolean).join("\n"),
       html: renderBrandedEmail({
@@ -321,6 +374,8 @@ async function sendAcceptedEmail(application, program) {
             ? `<p>${escapeHtml(program.admissionInstructions).replace(/\n/g, "<br>")}</p>`
             : "",
           `<p>Notre équipe pourra vous recontacter pour la suite.</p>`,
+          `<p>${escapeHtml(spaceCtaText)}</p>`,
+          `<p style="text-align:center;margin:28px 0;"><a href="${spaceCtaUrl}" style="display:inline-block;background:#1B4332;color:#FFFFFF;text-decoration:none;padding:12px 28px;border-radius:8px;font-weight:700;">${escapeHtml(spaceCtaLabel)}</a></p>`,
         ].filter(Boolean).join(""),
       }),
     });

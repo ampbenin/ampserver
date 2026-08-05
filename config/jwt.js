@@ -13,4 +13,12 @@ module.exports = {
     secret: process.env.JWT_SECRET_NUMSAL || process.env.JWT_SECRET,
     expiresIn: "1d",
   },
+
+  // Secret dédié pour "Mon espace" (comptes volontaires, publics) — durée
+  // plus longue que l'admin : usage occasionnel, faible enjeu de sécurité,
+  // on évite de forcer une reconnexion fréquente pour ce public.
+  volunteer: {
+    secret: process.env.JWT_SECRET_VOLUNTEER || process.env.JWT_SECRET,
+    expiresIn: "7d",
+  },
 };

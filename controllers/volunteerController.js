@@ -227,4 +227,7 @@ module.exports = {
   getVolunteerById,
   deleteVolunteer,
   assignVolunteerMissions,
+  // Réutilisé par controllers/volunteerAuthController.js (résolution des
+  // titres de programme pour la fiche "Mon espace" d'un volontaire connecté).
+  attachProgramTitles,
 };
