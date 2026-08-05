@@ -14,7 +14,12 @@ const ApplicationFieldSchema = new mongoose.Schema(
     label: { type: String, required: true, trim: true },
     type: {
       type: String,
-      enum: ["TEXT", "TEXTAREA", "EMAIL", "PHONE", "NUMBER", "DATE", "SELECT", "CHECKBOX"],
+      // URL/IMAGE ajoutés pour les formulaires de preuve de tâche de
+      // volontariat (voir models/volunteerProgram.js#tasks.proofForm) — non
+      // exposés dans le constructeur du formulaire de candidature
+      // (PROOF_FIELD_TYPES y est distinct de FIELD_TYPES côté frontend),
+      // mais le schéma reste partagé pour éviter toute duplication.
+      enum: ["TEXT", "TEXTAREA", "EMAIL", "PHONE", "NUMBER", "DATE", "SELECT", "CHECKBOX", "URL", "IMAGE"],
       required: true,
     },
     required: { type: Boolean, default: false },
@@ -30,6 +35,9 @@ const ApplicationFieldSchema = new mongoose.Schema(
       pattern: { type: String, default: "" },
       min: { type: Number, default: null },
       max: { type: Number, default: null },
+      // Pertinent uniquement pour IMAGE — nombre maximum de photos acceptées
+      // pour ce champ (null = pas de limite au-delà du bon sens de l'UI).
+      maxImages: { type: Number, default: null },
     },
     // Sous-champ conditionnel : n'apparaît que si le champ `fieldId` (une
     // liste déroulante ou une case à cocher) a répondu une des `values`.

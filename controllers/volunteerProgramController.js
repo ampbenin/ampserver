@@ -203,6 +203,12 @@ exports.updateProgramMeta = async (req, res, next) => {
         if (!["ONCE", "DAILY", "WEEKLY"].includes(task.recurrence)) {
           return res.status(400).json({ message: `Récurrence invalide pour la tâche "${task.title}"` });
         }
+        const proofFields = task.proofForm?.fields;
+        if (Array.isArray(proofFields) && proofFields.length > 0) {
+          // Pas de champ verrouillé pour un formulaire de preuve de tâche.
+          const proofError = validateFormFieldsDefinition(proofFields, []);
+          if (proofError) return res.status(400).json({ message: `Tâche "${task.title}" : ${proofError}` });
+        }
       }
       program.tasks = programTasks;
     }

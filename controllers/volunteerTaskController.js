@@ -5,11 +5,27 @@
  * raisonnement complet (occurrences dues, seuil de validation automatique).
  */
 
+const streamifier = require("streamifier");
+const cloudinary = require("../utils/cloudinary");
 const getVolunteerProgramModel = require("../models/volunteerProgram");
 const getVolunteerTaskSubmissionModel = require("../models/volunteerTaskSubmission");
 const Volunteer = require("../models/volunteer");
 const { canReviewProgram } = require("./volunteerProgramController");
 const { getDueOccurrences, computeProgress, startOfDay } = require("../utils/volunteerTaskLogic");
+const { validateApplicationResponses } = require("../utils/applicationFormLogic");
+
+// Repli utilisé quand une tâche n'a aucun champ de preuve configuré (tâches
+// créées avant ce chantier, ou staff n'ayant pas encore personnalisé) — un
+// simple champ Description obligatoire, jamais un formulaire vide.
+const DEFAULT_PROOF_FIELDS = [
+  {
+    id: "description", label: "Description", type: "TEXTAREA", required: true,
+    locked: false, options: [], validation: {}, conditional: { fieldId: "", values: [] },
+  },
+];
+
+const getEffectiveProofFields = (task) =>
+  (task.proofForm?.fields?.length > 0) ? task.proofForm.fields : DEFAULT_PROOF_FIELDS;
 
 /* -------------------- Interne : recalcule et promeut le statut si le seuil est atteint -------------------- */
 /* Ne fait JAMAIS de rétrogradation (voir le plan) : ne touche ni "Refusé" ni
@@ -36,12 +52,9 @@ async function recalculateMissionStatus(program, volunteerId) {
 /* -------------------- Protégé (Mon espace) : soumettre une preuve -------------------- */
 exports.submitTask = async (req, res, next) => {
   try {
-    const { programId, taskId, occurrenceDate, proofText, proofUrl } = req.body;
+    const { programId, taskId, occurrenceDate, responses } = req.body;
     if (!programId || !taskId) {
       return res.status(400).json({ message: "Programme et tâche requis" });
-    }
-    if (!proofText && !proofUrl) {
-      return res.status(400).json({ message: "Merci de fournir une preuve (texte ou lien)" });
     }
 
     const volunteer = await Volunteer.findById(req.user.id);
@@ -66,12 +79,15 @@ exports.submitTask = async (req, res, next) => {
       occurrenceKey = match;
     }
 
+    const proofFields = getEffectiveProofFields(task);
+    const validationError = validateApplicationResponses(proofFields, responses || {});
+    if (validationError) return res.status(400).json({ message: validationError });
+
     const Submission = getVolunteerTaskSubmissionModel();
     await Submission.findOneAndUpdate(
       { programId, volunteerId: volunteer._id, taskId, occurrenceDate: occurrenceKey },
       {
-        proofText: proofText || "",
-        proofUrl: proofUrl || "",
+        responses: responses || {},
         status: "PENDING",
         submittedAt: new Date(),
         reviewedBy: null,
@@ -82,6 +98,29 @@ exports.submitTask = async (req, res, next) => {
     );
 
     res.status(201).json({ message: "Preuve soumise, en attente de validation." });
+  } catch (error) {
+    next(error);
+  }
+};
+
+/* -------------------- Protégé (Mon espace) : uploader une image de preuve -------------------- */
+/* Une image à la fois — le volontaire peut appeler cet endpoint plusieurs
+   fois pour un champ IMAGE acceptant plusieurs photos (voir ProgramProgress.jsx),
+   accumulant les URLs Cloudinary côté client avant l'envoi final du formulaire.
+   Mirror de controllers/numsal/testimonialController.js#uploadPhoto. */
+exports.uploadProofImage = async (req, res, next) => {
+  try {
+    if (!req.file) return res.status(400).json({ message: "Aucun fichier reçu" });
+
+    const uploaded = await new Promise((resolve, reject) => {
+      const uploadStream = cloudinary.uploader.upload_stream(
+        { folder: "ong-site/volunteer-tasks", resource_type: "image" },
+        (error, result) => (error ? reject(error) : resolve(result))
+      );
+      streamifier.createReadStream(req.file.buffer).pipe(uploadStream);
+    });
+
+    res.status(201).json({ url: uploaded.secure_url });
   } catch (error) {
     next(error);
   }
@@ -116,12 +155,15 @@ exports.getMyProgramProgress = async (req, res, next) => {
         return {
           occurrenceDate,
           status: submission?.status || "TODO",
-          proofText: submission?.proofText || "",
-          proofUrl: submission?.proofUrl || "",
+          responses: submission?.responses || {},
           reviewNote: submission?.reviewNote || "",
         };
       });
-      return { id: task.id, title: task.title, description: task.description, recurrence: task.recurrence, occurrences };
+      return {
+        id: task.id, title: task.title, description: task.description, recurrence: task.recurrence,
+        proofFields: getEffectiveProofFields(task),
+        occurrences,
+      };
     });
 
     const progress = computeProgress(program.tasks || [], programEntry.assignedAt, program.endDate, submissions);
@@ -171,6 +213,7 @@ exports.listSubmissions = async (req, res, next) => {
         volunteerName: volunteer ? `${volunteer.prenom} ${volunteer.nom}` : "Volontaire introuvable",
         volunteerEmail: volunteer?.email || "",
         taskTitle: task?.title || "Tâche supprimée",
+        proofFields: task ? getEffectiveProofFields(task) : DEFAULT_PROOF_FIELDS,
       };
     });
 

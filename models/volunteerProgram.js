@@ -88,6 +88,15 @@ const VolunteerProgramSchema = new mongoose.Schema(
         // de la date d'acceptation du volontaire à la fin du programme (voir
         // utils/volunteerTaskLogic.js).
         recurrence: { type: String, enum: ["ONCE", "DAILY", "WEEKLY"], default: "ONCE" },
+        // Formulaire de preuve spécifique à cette tâche (texte, URL avec
+        // aperçu, image(s) uploadées vers Cloudinary...) — même schéma que
+        // applicationForm.fields. Si vide, controllers/volunteerTaskController.js
+        // applique un repli par défaut (un champ Description obligatoire),
+        // donc les tâches créées avant ce champ restent utilisables telles
+        // quelles sans script de migration.
+        proofForm: {
+          fields: { type: [ApplicationFieldSchema], default: [] },
+        },
       },
     ],
 

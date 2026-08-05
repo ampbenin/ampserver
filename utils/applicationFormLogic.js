@@ -120,7 +120,12 @@ const validateApplicationResponses = (fields, responses) => {
     if (!isFieldVisible(field, responses, fieldsById)) continue;
 
     const value = responses?.[field.id];
-    const isEmpty = value === undefined || value === null || value === "";
+    // IMAGE : la valeur est un tableau d'URLs Cloudinary — "vide" veut dire
+    // tableau absent/vide, pas une simple valeur falsy (un tableau est
+    // toujours "truthy" en JS).
+    const isEmpty = field.type === "IMAGE"
+      ? !Array.isArray(value) || value.length === 0
+      : value === undefined || value === null || value === "";
 
     if (field.required && isEmpty) {
       return `Le champ "${field.label}" est requis`;
@@ -164,6 +169,19 @@ const validateApplicationResponses = (fields, responses) => {
 
     if (field.type === "SELECT" && field.options?.length && !field.options.includes(value)) {
       return `"${field.label}" doit être une des valeurs proposées`;
+    }
+
+    if (field.type === "URL" && !/^https?:\/\/.+/i.test(String(value))) {
+      return `"${field.label}" doit être un lien valide (commençant par http:// ou https://)`;
+    }
+
+    if (field.type === "IMAGE") {
+      if (!Array.isArray(value) || !value.every((url) => typeof url === "string" && url)) {
+        return `"${field.label}" doit être une liste de photos valides`;
+      }
+      if (v.maxImages && value.length > v.maxImages) {
+        return `"${field.label}" accepte au maximum ${v.maxImages} photo(s)`;
+      }
     }
   }
   return null;

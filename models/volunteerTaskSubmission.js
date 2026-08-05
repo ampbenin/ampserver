@@ -21,8 +21,10 @@ const VolunteerTaskSubmissionSchema = new mongoose.Schema(
     // null pour une tâche ONCE ; sinon la date (minuit) de l'échéance DAILY/WEEKLY concernée.
     occurrenceDate: { type: Date, default: null },
 
-    proofText: { type: String, default: "" },
-    proofUrl: { type: String, default: "" },
+    // Réponses au formulaire de preuve de la tâche (task.proofForm.fields),
+    // clé = field.id — mêmes conventions que VolunteerApplication.responses.
+    // Pour un champ IMAGE, la valeur est un tableau d'URLs Cloudinary.
+    responses: { type: Map, of: mongoose.Schema.Types.Mixed, default: {} },
 
     status: {
       type: String,
