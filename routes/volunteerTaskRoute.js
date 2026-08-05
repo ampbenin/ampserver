@@ -21,6 +21,7 @@ router.get("/my-progress/:programId", volunteerAuthMiddleware, ctrl.getMyProgram
 router.post("/upload-proof-image", volunteerAuthMiddleware, upload.single("file"), ctrl.uploadProofImage);
 
 // 🔐 Staff — modération + suivi (autorisation fine via canReviewProgram dans le contrôleur)
+router.get("/my-supervised-programs", authMiddleware, ctrl.listMySupervisedPrograms);
 router.get("/submissions", authMiddleware, ctrl.listSubmissions);
 router.patch("/submissions/:id/accept", authMiddleware, ctrl.approveSubmission);
 router.patch("/submissions/:id/reject", authMiddleware, ctrl.rejectSubmission);

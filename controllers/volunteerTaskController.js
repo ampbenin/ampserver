@@ -351,6 +351,27 @@ exports.listProgramProgress = async (req, res, next) => {
   }
 };
 
+/* -------------------- Staff (SUPERVISEUR) : programmes qui me sont affectés -------------------- */
+exports.listMySupervisedPrograms = async (req, res, next) => {
+  try {
+    const User = getUserModel();
+    const fullUser = await User.findById(req.user.id).select("supervisedAssignments");
+    const assignments = fullUser?.supervisedAssignments || [];
+
+    const Program = getVolunteerProgramModel();
+    const programs = await Program.find({ _id: { $in: assignments.map((a) => a.programId) } }).select("title");
+
+    const items = programs.map((p) => {
+      const assignment = assignments.find((a) => a.programId.toString() === p._id.toString());
+      return { programId: p._id, title: p.title, volunteerCount: assignment?.volunteerIds?.length || 0 };
+    });
+
+    res.json({ items });
+  } catch (error) {
+    next(error);
+  }
+};
+
 // Réutilisés par controllers/volunteerProgramPartnerController.js.
 exports.getEffectiveProofFields = getEffectiveProofFields;
 exports.DEFAULT_PROOF_FIELDS = DEFAULT_PROOF_FIELDS;
