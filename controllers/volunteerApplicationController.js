@@ -23,8 +23,12 @@ const FRONTEND_BASE = process.env.FRONTEND_URL || "https://ampbenin.netlify.app"
 // Fixé en dur (pas de process.env.RESEND_FROM_EMAIL) : cette variable est
 // partagée avec NumSAL (controllers/numsal/*.js) et réglée côté serveur sur
 // son nom de marque — la lire ici affichait "NumSAL" comme expéditeur des
-// emails de candidature volontaire AMP Bénin, au lieu du bon nom.
-const RESEND_FROM = "VOLONTAIRE AMP BENIN <onboarding@resend.dev>";
+// emails de candidature volontaire AMP Bénin, au lieu du bon nom. L'adresse
+// (candidatures@ampbenin.org) reste la même que RESEND_FROM_EMAIL — c'est
+// un domaine vérifié Resend, PAS onboarding@resend.dev (sandbox restreinte
+// à l'email du propriétaire du compte, d'où les emails qui n'arrivaient
+// plus après un premier correctif trop rapide de ce nom d'expéditeur).
+const RESEND_FROM = "VOLONTAIRE AMP BENIN <candidatures@ampbenin.org>";
 const AMP_BRAND = {
   brandLabel: "AMP BÉNIN — Volontariat",
   footerText: "AMP BÉNIN — Programme de volontariat · Ceci est un message automatique.",

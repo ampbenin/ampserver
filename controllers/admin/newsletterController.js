@@ -60,8 +60,11 @@ exports.sendMail = async (req, res) => {
       await resend.emails.send({
         // Fixé en dur : process.env.RESEND_FROM_EMAIL est partagée avec NumSAL
         // et réglée côté serveur sur son nom de marque, ce qui affichait
-        // "NumSAL" comme expéditeur de la newsletter AMP Bénin.
-        from: 'AMP BENIN <onboarding@resend.dev>',
+        // "NumSAL" comme expéditeur de la newsletter AMP Bénin. Adresse
+        // (candidatures@ampbenin.org) inchangée par rapport à
+        // RESEND_FROM_EMAIL — domaine vérifié Resend, PAS onboarding@resend.dev
+        // (sandbox restreinte, emails qui n'arrivaient plus avec cette adresse).
+        from: 'AMP BENIN <candidatures@ampbenin.org>',
         to: batch,
         subject: subject || 'Newsletter',
         text: text || '',

@@ -16,7 +16,11 @@ const resend = require("../utils/resendMailer");
 const { renderBrandedEmail, escapeHtml } = require("../utils/emailTemplates");
 const { attachProgramTitles } = require("./volunteerController");
 
-const RESEND_FROM = "VOLONTAIRE AMP BENIN <onboarding@resend.dev>";
+// Adresse alignée sur le domaine vérifié Resend (candidatures@ampbenin.org,
+// voir .env RESEND_FROM_EMAIL) — PAS onboarding@resend.dev (domaine
+// sandbox Resend, restreint à l'email du propriétaire du compte : les
+// emails vers de vrais destinataires n'arrivaient plus avec cette adresse).
+const RESEND_FROM = "VOLONTAIRE AMP BENIN <candidatures@ampbenin.org>";
 const FRONTEND_BASE = process.env.FRONTEND_URL || "https://ampbenin.netlify.app";
 const AMP_BRAND = {
   brandLabel: "AMP BÉNIN — Volontariat",
