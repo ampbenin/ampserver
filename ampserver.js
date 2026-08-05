@@ -67,6 +67,8 @@ app.use("/api/volunteer-applications", require("./routes/volunteerApplicationRou
 app.use("/api/volunteer-form-templates", require("./routes/volunteerFormTemplateRoute"));
 // Comptes volontaires "Mon espace" (connexion, inscription, mot de passe).
 app.use("/api/volunteer-auth", require("./routes/volunteerAuthRoute"));
+// Suivi des tâches de mission par programme (soumissions + modération).
+app.use("/api/volunteer-tasks", require("./routes/volunteerTaskRoute"));
 app.use("/api/newsletter", newsletterRoutes);
 app.use("/api/contact", contactRoutes);
 app.use("/api/partner-form", partnerRoutes);

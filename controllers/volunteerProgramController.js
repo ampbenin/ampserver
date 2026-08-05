@@ -160,6 +160,7 @@ exports.updateProgramMeta = async (req, res, next) => {
       capacity, accessMode, applicationDeadline, brandColor,
       admissionInstructions, contactWhatsapp, contactEmail,
       applicationFormFields, estimatedDuration, reviewerIds,
+      programTasks, missionValidationThreshold,
     } = req.body;
 
     if (brandColor !== undefined && brandColor && !isValidHexColor(brandColor)) {
@@ -192,6 +193,25 @@ exports.updateProgramMeta = async (req, res, next) => {
       const defError = validateFormFieldsDefinition(applicationFormFields, LOCKED_BUILTIN_FIELDS);
       if (defError) return res.status(400).json({ message: defError });
       program.applicationForm.fields = applicationFormFields;
+    }
+
+    if (Array.isArray(programTasks)) {
+      for (const task of programTasks) {
+        if (!task.id || !task.title) {
+          return res.status(400).json({ message: "Chaque tâche doit avoir un identifiant et un titre" });
+        }
+        if (!["ONCE", "DAILY", "WEEKLY"].includes(task.recurrence)) {
+          return res.status(400).json({ message: `Récurrence invalide pour la tâche "${task.title}"` });
+        }
+      }
+      program.tasks = programTasks;
+    }
+    if (missionValidationThreshold !== undefined) {
+      const threshold = Number(missionValidationThreshold);
+      if (Number.isNaN(threshold) || threshold < 0 || threshold > 100) {
+        return res.status(400).json({ message: "Le seuil de validation doit être un nombre entre 0 et 100" });
+      }
+      program.missionValidationThreshold = threshold;
     }
 
     await program.save();

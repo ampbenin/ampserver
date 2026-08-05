@@ -73,6 +73,30 @@ const VolunteerProgramSchema = new mongoose.Schema(
       // du candidat à la place d'une estimation calculée.
       estimatedDuration: { type: String, default: "" },
     },
+
+    // Tâches que chaque volontaire ACCEPTÉ à ce programme doit accomplir
+    // (voir models/volunteerTaskSubmission.js pour le suivi des preuves).
+    // `id` est généré côté client (même pattern que ApplicationFieldSchema),
+    // stable dans le temps — les soumissions y font référence.
+    tasks: [
+      {
+        _id: false,
+        id: { type: String, required: true },
+        title: { type: String, required: true, trim: true },
+        description: { type: String, default: "" },
+        // ONCE = une seule fois ; DAILY/WEEKLY = une échéance par jour/semaine,
+        // de la date d'acceptation du volontaire à la fin du programme (voir
+        // utils/volunteerTaskLogic.js).
+        recurrence: { type: String, enum: ["ONCE", "DAILY", "WEEKLY"], default: "ONCE" },
+      },
+    ],
+
+    // % d'occurrences de tâches dues et approuvées à partir duquel le statut
+    // du volontaire sur ce programme passe automatiquement à "Mission
+    // validée" (voir volunteerTaskController.reviewSubmission) — ne
+    // s'applique que si `tasks` n'est pas vide, et ne rétrograde jamais un
+    // statut déjà positionné manuellement.
+    missionValidationThreshold: { type: Number, default: 100, min: 0, max: 100 },
   },
   { timestamps: true }
 );
