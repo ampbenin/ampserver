@@ -17,7 +17,11 @@ const { renderBrandedEmail, renderContactBlockText, escapeHtml } = require("../u
 const { closeExpiredPrograms, canReviewProgram, DEFAULT_BUILTIN_FIELDS } = require("./volunteerProgramController");
 const { validateApplicationResponses } = require("../utils/applicationFormLogic");
 
-const RESEND_FROM = process.env.RESEND_FROM_EMAIL || "AMP BENIN <onboarding@resend.dev>";
+// Fixé en dur (pas de process.env.RESEND_FROM_EMAIL) : cette variable est
+// partagée avec NumSAL (controllers/numsal/*.js) et réglée côté serveur sur
+// son nom de marque — la lire ici affichait "NumSAL" comme expéditeur des
+// emails de candidature volontaire AMP Bénin, au lieu du bon nom.
+const RESEND_FROM = "VOLONTAIRE AMP BENIN <onboarding@resend.dev>";
 const AMP_BRAND = {
   brandLabel: "AMP BÉNIN — Volontariat",
   footerText: "AMP BÉNIN — Programme de volontariat · Ceci est un message automatique.",

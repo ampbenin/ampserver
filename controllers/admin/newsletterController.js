@@ -58,7 +58,10 @@ exports.sendMail = async (req, res) => {
     for (let i = 0; i < recipients.length; i += batchSize) {
       const batch = recipients.slice(i, i + batchSize);
       await resend.emails.send({
-        from: process.env.RESEND_FROM_EMAIL || 'AMP BENIN <onboarding@resend.dev>',
+        // Fixé en dur : process.env.RESEND_FROM_EMAIL est partagée avec NumSAL
+        // et réglée côté serveur sur son nom de marque, ce qui affichait
+        // "NumSAL" comme expéditeur de la newsletter AMP Bénin.
+        from: 'AMP BENIN <onboarding@resend.dev>',
         to: batch,
         subject: subject || 'Newsletter',
         text: text || '',

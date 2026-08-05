@@ -138,7 +138,10 @@ exports.forgotPassword = async (req, res) => {
 
     try {
       await resend.emails.send({
-        from: process.env.RESEND_FROM_EMAIL || "AMP BENIN <onboarding@resend.dev>",
+        // Fixé en dur : process.env.RESEND_FROM_EMAIL est partagée avec NumSAL
+        // et réglée côté serveur sur son nom de marque, ce qui affichait
+        // "NumSAL" comme expéditeur des emails de réinitialisation AMP Bénin.
+        from: "AMP BENIN <onboarding@resend.dev>",
         to: email,
         subject: "Réinitialisation de votre mot de passe — AMP BENIN",
         text: `Bonjour ${user.name},\n\nVous avez demandé la réinitialisation de votre mot de passe.\nCliquez sur ce lien (valable 1 heure) pour choisir un nouveau mot de passe :\n${resetUrl}\n\nSi vous n'êtes pas à l'origine de cette demande, ignorez cet email.`,
