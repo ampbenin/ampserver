@@ -23,5 +23,6 @@ router.get("/mine", volunteerAuthMiddleware, ctrl.listMyApplications);
 router.get("/", authMiddleware, ctrl.listApplications);
 router.patch("/:id/accept", authMiddleware, ctrl.acceptApplication);
 router.patch("/:id/reject", authMiddleware, ctrl.rejectApplication);
+router.delete("/:id", authMiddleware, ctrl.deleteApplication);
 
 module.exports = router;

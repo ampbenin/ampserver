@@ -251,6 +251,35 @@ exports.rejectApplication = async (req, res, next) => {
   }
 };
 
+/* -------------------- Staff : supprimer une candidature -------------------- */
+/* Utilisable quel que soit le statut (en attente, acceptée ou rejetée) —
+   une candidature acceptée a déjà été copiée dans le profil Volunteer
+   (voir finalizeAcceptance), donc la supprimer ici ne fait perdre aucune
+   donnée sur le volontaire lui-même. Même règle d'autorisation
+   qu'accept/reject. */
+exports.deleteApplication = async (req, res, next) => {
+  try {
+    const Application = getVolunteerApplicationModel();
+    const application = await Application.findById(req.params.id);
+    if (!application) return res.status(404).json({ message: "Candidature introuvable" });
+
+    if (application.programId) {
+      const Program = getVolunteerProgramModel();
+      const program = await Program.findById(application.programId);
+      if (program && !canReviewProgram(program, req.user)) {
+        return res.status(403).json({ message: "Vous n'êtes pas autorisé à gérer les candidatures de ce programme" });
+      }
+    } else if (!["ADMIN", "EDITOR"].includes(req.user.role)) {
+      return res.status(403).json({ message: "Non autorisé" });
+    }
+
+    await application.deleteOne();
+    res.json({ message: "Candidature supprimée" });
+  } catch (error) {
+    next(error);
+  }
+};
+
 /* -------------------- Interne : accepter une candidature -------------------- */
 /* Trouve-ou-crée le profil Volunteer par email (remplace le bouton
    "Promouvoir" manuel de l'ancien système, qui n'agissait jamais en masse
