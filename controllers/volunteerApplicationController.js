@@ -126,14 +126,17 @@ exports.applyToProgram = async (req, res, next) => {
 };
 
 /* -------------------- Staff : lister les candidatures -------------------- */
-/* Filtrable par programId (?programId=... ou ?programId=spontaneous) et
-   status. Un reviewer non-ADMIN/EDITOR ne voit que les candidatures des
-   programmes qui lui sont rattachés (pas les candidatures spontanées, qui
-   nécessitent ADMIN/EDITOR). */
+/* Filtrable par programId (?programId=... ou ?programId=spontaneous), status,
+   recherche libre (nom/email/téléphone), plage de dates de candidature et
+   réponses de formulaire (SELECT/CHECKBOX) — paginé (page/limit, défaut
+   1/10) pour rester jouable une fois qu'un programme dépasse quelques
+   dizaines de candidatures. Un reviewer non-ADMIN/EDITOR ne voit que les
+   candidatures des programmes qui lui sont rattachés (pas les candidatures
+   spontanées, qui nécessitent ADMIN/EDITOR). */
 exports.listApplications = async (req, res, next) => {
   try {
     const Application = getVolunteerApplicationModel();
-    const { programId, status } = req.query;
+    const { programId, status, search, dateFrom, dateTo, fieldFilters } = req.query;
     const query = {};
 
     if (programId === "spontaneous") {
@@ -155,8 +158,47 @@ exports.listApplications = async (req, res, next) => {
 
     if (status) query.status = status;
 
-    const applications = await Application.find(query).sort({ createdAt: -1 });
-    res.json({ items: applications });
+    // Recherche libre : scopée aux champs fixes (nom/email/téléphone) —
+    // les réponses de formulaire passent par fieldFilters ci-dessous, pas
+    // par la recherche (pas de wildcard simple sur une Map en Mongo).
+    if (search?.trim()) {
+      const regex = new RegExp(search.trim().replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "i");
+      query.$or = [
+        { applicantFirstName: regex },
+        { applicantLastName: regex },
+        { applicantEmail: regex },
+        { applicantPhone: regex },
+      ];
+    }
+
+    if (dateFrom || dateTo) {
+      query.createdAt = {};
+      if (dateFrom) query.createdAt.$gte = new Date(dateFrom);
+      if (dateTo) query.createdAt.$lte = new Date(`${dateTo}T23:59:59.999`);
+    }
+
+    if (fieldFilters) {
+      let parsed;
+      try {
+        parsed = JSON.parse(fieldFilters);
+      } catch {
+        return res.status(400).json({ message: "fieldFilters invalide (JSON attendu)" });
+      }
+      Object.entries(parsed || {}).forEach(([fieldId, value]) => {
+        if (value === undefined || value === null || value === "") return;
+        query[`responses.${fieldId}`] = value;
+      });
+    }
+
+    const page = Math.max(1, parseInt(req.query.page, 10) || 1);
+    const limit = Math.min(100, Math.max(1, parseInt(req.query.limit, 10) || 10));
+
+    const [items, total] = await Promise.all([
+      Application.find(query).sort({ createdAt: -1 }).skip((page - 1) * limit).limit(limit),
+      Application.countDocuments(query),
+    ]);
+
+    res.json({ items, total, page, totalPages: Math.max(1, Math.ceil(total / limit)) });
   } catch (error) {
     next(error);
   }
@@ -275,6 +317,126 @@ exports.deleteApplication = async (req, res, next) => {
 
     await application.deleteOne();
     res.json({ message: "Candidature supprimée" });
+  } catch (error) {
+    next(error);
+  }
+};
+
+/* -------------------- Staff : accepter plusieurs candidatures à la fois -------------------- */
+/* Réutilise finalizeAcceptance (même logique/email que l'acceptation
+   unitaire) — tolère les échecs individuels (déjà traitée, non autorisée...)
+   sans faire échouer le reste du lot. */
+exports.bulkAcceptApplications = async (req, res, next) => {
+  try {
+    const ids = Array.isArray(req.body?.ids) ? req.body.ids : [];
+    if (ids.length === 0) return res.status(400).json({ message: "Aucune candidature sélectionnée" });
+
+    const Application = getVolunteerApplicationModel();
+    const Program = getVolunteerProgramModel();
+    let accepted = 0;
+    const failed = [];
+
+    for (const id of ids) {
+      try {
+        const application = await Application.findById(id);
+        if (!application) { failed.push({ id, message: "Candidature introuvable" }); continue; }
+        if (application.status !== "PENDING") { failed.push({ id, message: "Déjà traitée" }); continue; }
+
+        let program = null;
+        if (application.programId) {
+          program = await Program.findById(application.programId);
+          if (!program) { failed.push({ id, message: "Programme introuvable" }); continue; }
+          if (!canReviewProgram(program, req.user)) { failed.push({ id, message: "Non autorisé" }); continue; }
+        } else if (!["ADMIN", "EDITOR"].includes(req.user.role)) {
+          failed.push({ id, message: "Non autorisé" });
+          continue;
+        }
+
+        await finalizeAcceptance(application, program, req.user.id);
+        accepted += 1;
+      } catch (itemError) {
+        failed.push({ id, message: itemError.message || "Erreur" });
+      }
+    }
+
+    res.json({ accepted, failed });
+  } catch (error) {
+    next(error);
+  }
+};
+
+/* -------------------- Staff : rejeter plusieurs candidatures à la fois -------------------- */
+exports.bulkRejectApplications = async (req, res, next) => {
+  try {
+    const ids = Array.isArray(req.body?.ids) ? req.body.ids : [];
+    if (ids.length === 0) return res.status(400).json({ message: "Aucune candidature sélectionnée" });
+
+    const Application = getVolunteerApplicationModel();
+    const Program = getVolunteerProgramModel();
+    let rejected = 0;
+    const failed = [];
+
+    for (const id of ids) {
+      try {
+        const application = await Application.findById(id);
+        if (!application) { failed.push({ id, message: "Candidature introuvable" }); continue; }
+        if (application.status !== "PENDING") { failed.push({ id, message: "Déjà traitée" }); continue; }
+
+        if (application.programId) {
+          const program = await Program.findById(application.programId);
+          if (!program) { failed.push({ id, message: "Programme introuvable" }); continue; }
+          if (!canReviewProgram(program, req.user)) { failed.push({ id, message: "Non autorisé" }); continue; }
+        } else if (!["ADMIN", "EDITOR"].includes(req.user.role)) {
+          failed.push({ id, message: "Non autorisé" });
+          continue;
+        }
+
+        application.status = "REJECTED";
+        application.reviewedBy = req.user.id;
+        application.reviewedAt = new Date();
+        await application.save();
+        rejected += 1;
+      } catch (itemError) {
+        failed.push({ id, message: itemError.message || "Erreur" });
+      }
+    }
+
+    res.json({ rejected, failed });
+  } catch (error) {
+    next(error);
+  }
+};
+
+/* -------------------- Staff : vider toutes les candidatures d'un programme -------------------- */
+/* Tous statuts confondus (en attente/acceptée/rejetée) — repartir de zéro
+   pour recevoir un nouveau lot de candidatures. Sans risque pour les
+   volontaires déjà admis : leur fiche Volunteer existe indépendamment
+   (créée par finalizeAcceptance), seule la liste de candidatures est vidée. */
+exports.deleteAllApplications = async (req, res, next) => {
+  try {
+    const { programId } = req.query;
+    if (!programId) return res.status(400).json({ message: "programId requis" });
+
+    const Application = getVolunteerApplicationModel();
+    const query = {};
+
+    if (programId === "spontaneous") {
+      query.programId = null;
+      if (!["ADMIN", "EDITOR"].includes(req.user.role)) {
+        return res.status(403).json({ message: "Non autorisé" });
+      }
+    } else {
+      const Program = getVolunteerProgramModel();
+      const program = await Program.findById(programId);
+      if (!program) return res.status(404).json({ message: "Programme introuvable" });
+      if (!canReviewProgram(program, req.user)) {
+        return res.status(403).json({ message: "Vous n'êtes pas autorisé à gérer les candidatures de ce programme" });
+      }
+      query.programId = programId;
+    }
+
+    const { deletedCount } = await Application.deleteMany(query);
+    res.json({ deletedCount });
   } catch (error) {
     next(error);
   }
