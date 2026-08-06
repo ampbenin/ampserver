@@ -20,6 +20,7 @@ const upload = multer({
 // 🔐 Partenaire connecté
 router.get("/my-programs", ...requirePartner, ctrl.listMyPartnerPrograms);
 router.get("/programs/:programId/stats", ...requirePartner, ctrl.getPartnerProgramStats);
+router.get("/programs/:programId/applications", ...requirePartner, ctrl.listPartnerApplications);
 router.get("/programs/:programId/report.pdf", ...requirePartner, ctrl.downloadImpactReport);
 router.get("/programs/:programId/my-comments", ...requirePartner, ctrl.listMyComments);
 router.post("/programs/:programId/comments", ...requirePartner, ctrl.submitPartnerComment);

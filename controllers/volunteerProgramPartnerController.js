@@ -12,12 +12,19 @@ const streamifier = require("streamifier");
 const { PDFDocument, StandardFonts, rgb } = require("pdf-lib");
 const getVolunteerProgramModel = require("../models/volunteerProgram");
 const getVolunteerTaskSubmissionModel = require("../models/volunteerTaskSubmission");
+const getVolunteerApplicationModel = require("../models/volunteerApplication");
 const getVolunteerProgramPartnerCommentModel = require("../models/volunteerProgramPartnerComment");
 const getUserModel = require("../models/gestionamp/User");
 const Volunteer = require("../models/volunteer");
 const cloudinary = require("../utils/cloudinary");
 const { computeProgress } = require("../utils/volunteerTaskLogic");
 const { getEffectiveProofFields } = require("./volunteerTaskController");
+const { buildApplicationFilterQuery, parsePagination } = require("./volunteerApplicationController");
+
+// Candidatures visibles par un partenaire : jamais les rejetées (contiennent
+// les coordonnées de personnes non retenues, décision confirmée avec
+// l'utilisateur) — seulement en attente + acceptées.
+const PARTNER_VISIBLE_STATUSES = ["PENDING", "ACCEPTED"];
 
 /* -------------------- Interne : vérifie que ce partenaire suit bien ce programme -------------------- */
 async function assertPartnerAccess(userId, programId) {
@@ -50,7 +57,7 @@ exports.getPartnerProgramStats = async (req, res, next) => {
 
     const Program = getVolunteerProgramModel();
     const program = await Program.findById(programId)
-      .select("title description location startDate endDate tasks missionValidationThreshold");
+      .select("title description location startDate endDate tasks missionValidationThreshold applicationForm");
     if (!program) return res.status(404).json({ message: "Programme introuvable" });
 
     const volunteers = await Volunteer.find({ "programs.programId": programId }).select("nom prenom programs");
@@ -109,6 +116,7 @@ exports.getPartnerProgramStats = async (req, res, next) => {
       program: {
         title: program.title, description: program.description, location: program.location,
         startDate: program.startDate, endDate: program.endDate,
+        applicationFormFields: program.applicationForm?.fields || [],
       },
       stats: {
         totalVolunteers: volunteers.length,
@@ -120,6 +128,52 @@ exports.getPartnerProgramStats = async (req, res, next) => {
       validatedVolunteers,
       progressOverTime,
     });
+  } catch (error) {
+    next(error);
+  }
+};
+
+/* -------------------- Protégé (PARTENAIRE) : candidatures du programme, lecture seule -------------------- */
+/* Même pagination/recherche/filtres que la liste staff
+   (volunteerApplicationController.js#listApplications, logique de filtre
+   partagée via buildApplicationFilterQuery) mais volontairement restreinte
+   à PARTNER_VISIBLE_STATUSES (jamais les rejetées) et sans aucune action
+   (pas de accept/reject/delete/bulk/groupes exposés dans ce contrôleur —
+   lecture seule par construction, pas seulement par absence de bouton
+   côté frontend). */
+exports.listPartnerApplications = async (req, res, next) => {
+  try {
+    const { programId } = req.params;
+    if (!(await assertPartnerAccess(req.user.id, programId))) {
+      return res.status(403).json({ message: "Vous ne suivez pas ce programme" });
+    }
+
+    const { search, dateFrom, dateTo, fieldFilters, status } = req.query;
+
+    let filterQuery;
+    try {
+      filterQuery = buildApplicationFilterQuery({ search, dateFrom, dateTo, fieldFilters });
+    } catch {
+      return res.status(400).json({ message: "fieldFilters invalide (JSON attendu)" });
+    }
+
+    // Le partenaire peut restreindre entre PENDING/ACCEPTED (case "Statut"
+    // du panneau de filtre), jamais élargir au-delà de ce que
+    // PARTNER_VISIBLE_STATUSES autorise, même si un statut arbitraire est
+    // envoyé côté requête.
+    const allowedStatuses = status && PARTNER_VISIBLE_STATUSES.includes(status) ? [status] : PARTNER_VISIBLE_STATUSES;
+
+    const query = { ...filterQuery, programId, status: { $in: allowedStatuses } };
+
+    const Application = getVolunteerApplicationModel();
+    const { page, limit } = parsePagination(req.query);
+
+    const [items, total] = await Promise.all([
+      Application.find(query).sort({ createdAt: -1 }).skip((page - 1) * limit).limit(limit),
+      Application.countDocuments(query),
+    ]);
+
+    res.json({ items, total, page, totalPages: Math.max(1, Math.ceil(total / limit)) });
   } catch (error) {
     next(error);
   }

@@ -125,6 +125,54 @@ exports.applyToProgram = async (req, res, next) => {
   }
 };
 
+/* -------------------- Interne : filtres partagés recherche/dates/formulaire -------------------- */
+/* Réutilisé par listApplications (staff, tous statuts) ET
+   volunteerProgramPartnerController.js#listPartnerApplications (partenaire,
+   restreint à PENDING/ACCEPTED côté appelant) — même logique de filtre,
+   deux périmètres d'autorisation et de statuts différents. Lève une erreur
+   si fieldFilters n'est pas du JSON valide ; à l'appelant de répondre 400. */
+function buildApplicationFilterQuery({ search, dateFrom, dateTo, fieldFilters }) {
+  const query = {};
+
+  // Recherche libre : scopée aux champs fixes (nom/email/téléphone) — les
+  // réponses de formulaire passent par fieldFilters, pas par la recherche
+  // (pas de wildcard simple sur une Map en Mongo).
+  if (search?.trim()) {
+    const regex = new RegExp(search.trim().replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "i");
+    query.$or = [
+      { applicantFirstName: regex },
+      { applicantLastName: regex },
+      { applicantEmail: regex },
+      { applicantPhone: regex },
+    ];
+  }
+
+  if (dateFrom || dateTo) {
+    query.createdAt = {};
+    if (dateFrom) query.createdAt.$gte = new Date(dateFrom);
+    if (dateTo) query.createdAt.$lte = new Date(`${dateTo}T23:59:59.999`);
+  }
+
+  if (fieldFilters) {
+    const parsed = JSON.parse(fieldFilters); // laisse throw si invalide
+    Object.entries(parsed || {}).forEach(([fieldId, value]) => {
+      if (value === undefined || value === null || value === "") return;
+      query[`responses.${fieldId}`] = value;
+    });
+  }
+
+  return query;
+}
+
+function parsePagination(query, defaultLimit = 10) {
+  const page = Math.max(1, parseInt(query.page, 10) || 1);
+  const limit = Math.min(100, Math.max(1, parseInt(query.limit, 10) || defaultLimit));
+  return { page, limit };
+}
+
+exports.buildApplicationFilterQuery = buildApplicationFilterQuery;
+exports.parsePagination = parsePagination;
+
 /* -------------------- Staff : lister les candidatures -------------------- */
 /* Filtrable par programId (?programId=... ou ?programId=spontaneous), status,
    recherche libre (nom/email/téléphone), plage de dates de candidature et
@@ -158,40 +206,15 @@ exports.listApplications = async (req, res, next) => {
 
     if (status) query.status = status;
 
-    // Recherche libre : scopée aux champs fixes (nom/email/téléphone) —
-    // les réponses de formulaire passent par fieldFilters ci-dessous, pas
-    // par la recherche (pas de wildcard simple sur une Map en Mongo).
-    if (search?.trim()) {
-      const regex = new RegExp(search.trim().replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "i");
-      query.$or = [
-        { applicantFirstName: regex },
-        { applicantLastName: regex },
-        { applicantEmail: regex },
-        { applicantPhone: regex },
-      ];
+    let filterQuery;
+    try {
+      filterQuery = buildApplicationFilterQuery({ search, dateFrom, dateTo, fieldFilters });
+    } catch {
+      return res.status(400).json({ message: "fieldFilters invalide (JSON attendu)" });
     }
+    Object.assign(query, filterQuery);
 
-    if (dateFrom || dateTo) {
-      query.createdAt = {};
-      if (dateFrom) query.createdAt.$gte = new Date(dateFrom);
-      if (dateTo) query.createdAt.$lte = new Date(`${dateTo}T23:59:59.999`);
-    }
-
-    if (fieldFilters) {
-      let parsed;
-      try {
-        parsed = JSON.parse(fieldFilters);
-      } catch {
-        return res.status(400).json({ message: "fieldFilters invalide (JSON attendu)" });
-      }
-      Object.entries(parsed || {}).forEach(([fieldId, value]) => {
-        if (value === undefined || value === null || value === "") return;
-        query[`responses.${fieldId}`] = value;
-      });
-    }
-
-    const page = Math.max(1, parseInt(req.query.page, 10) || 1);
-    const limit = Math.min(100, Math.max(1, parseInt(req.query.limit, 10) || 10));
+    const { page, limit } = parsePagination(req.query);
 
     const [items, total] = await Promise.all([
       Application.find(query).sort({ createdAt: -1 }).skip((page - 1) * limit).limit(limit),
