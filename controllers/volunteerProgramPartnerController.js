@@ -34,6 +34,9 @@ async function assertPartnerAccess(userId, programId) {
   const partner = await User.findById(userId).select("partnerProgramIds");
   return (partner?.partnerProgramIds || []).some((id) => id.toString() === programId.toString());
 }
+// Réutilisé par controllers/volunteerDisciplineController.js pour scoper
+// les signalements d'un PARTENAIRE aux programmes qu'il suit.
+exports.assertPartnerAccess = assertPartnerAccess;
 
 /* -------------------- Protégé (PARTENAIRE) : programmes suivis -------------------- */
 exports.listMyPartnerPrograms = async (req, res, next) => {

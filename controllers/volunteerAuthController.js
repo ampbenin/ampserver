@@ -11,6 +11,7 @@
 const jwt = require("jsonwebtoken");
 const crypto = require("crypto");
 const Volunteer = require("../models/volunteer");
+const VolunteerSanction = require("../models/volunteerSanction");
 const jwtConfig = require("../config/jwt");
 const resend = require("../utils/resendMailer");
 const { renderBrandedEmail, escapeHtml } = require("../utils/emailTemplates");
@@ -122,10 +123,37 @@ exports.login = async (req, res, next) => {
       return res.status(400).json({ message: "Email et mot de passe requis" });
     }
 
-    const volunteer = await Volunteer.findOne({ email: email.toLowerCase().trim(), isActive: true });
+    // Cherché par email SEUL (pas isActive:true dans la requête) : une
+    // suspension arrivée à échéance doit se lever automatiquement ici,
+    // avant de décider si le compte est bloqué ou non (voir plus bas) —
+    // impossible à faire avec un simple filtre Mongo statique.
+    const volunteer = await Volunteer.findOne({ email: email.toLowerCase().trim() });
     if (!volunteer) {
       return res.status(401).json({ message: "Identifiants invalides" });
     }
+
+    if (!volunteer.isActive) {
+      const activeSuspension = await VolunteerSanction.findOne({
+        volunteerId: volunteer._id, type: "SUSPENSION", status: "ACTIVE",
+      });
+
+      if (activeSuspension?.suspendedUntil && activeSuspension.suspendedUntil <= new Date()) {
+        // Période de suspension écoulée : réactivation automatique, pas
+        // besoin d'une action ADMIN (décision confirmée avec l'utilisateur).
+        activeSuspension.status = "LIFTED";
+        activeSuspension.liftedAt = new Date();
+        activeSuspension.liftReason = "Fin de la période de suspension (automatique)";
+        await activeSuspension.save();
+        volunteer.isActive = true;
+        await volunteer.save();
+      } else {
+        const untilStr = activeSuspension?.suspendedUntil
+          ? ` jusqu'au ${new Date(activeSuspension.suspendedUntil).toLocaleDateString("fr-FR")}`
+          : "";
+        return res.status(403).json({ message: `Votre compte est suspendu${untilStr}.` });
+      }
+    }
+
     if (!volunteer.password) {
       return res.status(403).json({
         message: 'Ce compte n\'est pas encore activé — consultez votre email, ou utilisez "mot de passe oublié" pour recevoir un nouveau lien.',
@@ -204,7 +232,34 @@ exports.me = async (req, res, next) => {
     if (!volunteer) return res.status(404).json({ message: "Profil introuvable" });
 
     const [populated] = await attachProgramTitles([volunteer]);
+
+    // Avertissements actifs non encore lus — voir
+    // volunteerDisciplineController.js. Affichés en bandeau "Mon espace"
+    // (src/components/volunteer/Dashboard.jsx), disparaissent une fois
+    // accusés (POST /api/volunteer-auth/warnings/:id/acknowledge).
+    const activeWarnings = await VolunteerSanction.find({
+      volunteerId: req.user.id, type: "WARNING", status: "ACTIVE", acknowledgedAt: null,
+    }).select("reason appliedAt");
+    populated.activeWarnings = activeWarnings;
+
     res.json(populated);
+  } catch (error) {
+    next(error);
+  }
+};
+
+/* -------------------- Protégé (Mon espace) : marquer un avertissement comme lu -------------------- */
+exports.acknowledgeWarning = async (req, res, next) => {
+  try {
+    const sanction = await VolunteerSanction.findOne({
+      _id: req.params.id, volunteerId: req.user.id, type: "WARNING",
+    });
+    if (!sanction) return res.status(404).json({ message: "Avertissement introuvable" });
+
+    sanction.acknowledgedAt = new Date();
+    await sanction.save();
+
+    res.json({ message: "Avertissement marqué comme lu" });
   } catch (error) {
     next(error);
   }

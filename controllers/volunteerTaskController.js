@@ -457,3 +457,7 @@ exports.listMySupervisedPrograms = async (req, res, next) => {
 // Réutilisés par controllers/volunteerProgramPartnerController.js.
 exports.getEffectiveProofFields = getEffectiveProofFields;
 exports.DEFAULT_PROOF_FIELDS = DEFAULT_PROOF_FIELDS;
+// Réutilisé par controllers/volunteerDisciplineController.js pour scoper
+// les signalements d'un SUPERVISEUR à ses volontaires affectés, exactement
+// comme le suivi de tâches.
+exports.getSupervisorAssignment = getSupervisorAssignment;

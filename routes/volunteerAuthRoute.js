@@ -13,5 +13,6 @@ router.post("/set-password", authLimiter, ctrl.setPassword);
 
 // 🔐 Protégé — profil du volontaire connecté
 router.get("/me", authMiddleware, ctrl.me);
+router.post("/warnings/:id/acknowledge", authMiddleware, ctrl.acknowledgeWarning);
 
 module.exports = router;

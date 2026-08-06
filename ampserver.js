@@ -71,6 +71,9 @@ app.use("/api/volunteer-auth", require("./routes/volunteerAuthRoute"));
 app.use("/api/volunteer-tasks", require("./routes/volunteerTaskRoute"));
 // Compte partenaire (statistiques/impact en lecture seule + commentaires).
 app.use("/api/volunteer-partner", require("./routes/volunteerProgramPartnerRoute"));
+// Discipline & sanctions des volontaires (signalement, avertissement/
+// suspension/bannissement, liste noire inter-programmes).
+app.use("/api/volunteer-discipline", require("./routes/volunteerDisciplineRoute"));
 app.use("/api/newsletter", newsletterRoutes);
 app.use("/api/contact", contactRoutes);
 app.use("/api/partner-form", partnerRoutes);
