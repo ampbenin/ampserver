@@ -88,6 +88,14 @@ const VolunteerProgramSchema = new mongoose.Schema(
         // de la date d'acceptation du volontaire à la fin du programme (voir
         // utils/volunteerTaskLogic.js).
         recurrence: { type: String, enum: ["ONCE", "DAILY", "WEEKLY"], default: "ONCE" },
+        // DRAFT = jamais visible/due côté volontaire. SCHEDULED = devient
+        // PUBLISHED tout seul dès que scheduledPublishAt est dépassée (voir
+        // resolveTaskStatus dans volunteerTaskController.js — même pattern
+        // de vérification paresseuse que closeExpiredPrograms, pas de cron).
+        // Défaut PUBLISHED : les tâches créées avant ce champ restent
+        // visibles telles quelles, aucune migration nécessaire.
+        status: { type: String, enum: ["DRAFT", "SCHEDULED", "PUBLISHED"], default: "PUBLISHED" },
+        scheduledPublishAt: { type: Date, default: null },
         // Formulaire de preuve spécifique à cette tâche (texte, URL avec
         // aperçu, image(s) uploadées vers Cloudinary...) — même schéma que
         // applicationForm.fields. Si vide, controllers/volunteerTaskController.js

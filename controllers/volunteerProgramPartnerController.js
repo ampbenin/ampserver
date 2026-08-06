@@ -19,7 +19,7 @@ const getUserModel = require("../models/gestionamp/User");
 const Volunteer = require("../models/volunteer");
 const cloudinary = require("../utils/cloudinary");
 const { computeProgress } = require("../utils/volunteerTaskLogic");
-const { getEffectiveProofFields } = require("./volunteerTaskController");
+const { getEffectiveProofFields, getPublishedTasks, resolveScheduledTasks } = require("./volunteerTaskController");
 const { buildApplicationFilterQuery, parsePagination } = require("./volunteerApplicationController");
 const { logPartnerActivity } = require("../utils/partnerActivityLogger");
 
@@ -62,10 +62,12 @@ exports.getPartnerProgramStats = async (req, res, next) => {
       return res.status(403).json({ message: "Vous ne suivez pas ce programme" });
     }
 
+    await resolveScheduledTasks();
     const Program = getVolunteerProgramModel();
     const program = await Program.findById(programId)
       .select("title description location startDate endDate tasks missionValidationThreshold applicationForm");
     if (!program) return res.status(404).json({ message: "Programme introuvable" });
+    const publishedTasks = getPublishedTasks(program);
 
     const volunteers = await Volunteer.find({ "programs.programId": programId }).select("nom prenom programs");
     const Submission = getVolunteerTaskSubmissionModel();
@@ -98,7 +100,7 @@ exports.getPartnerProgramStats = async (req, res, next) => {
     for (const v of volunteers) {
       const programEntry = v.programs.find((p) => p.programId.toString() === programId);
       const submissions = submissionsByVolunteer.get(String(v._id)) || [];
-      const progress = computeProgress(program.tasks || [], programEntry.assignedAt, program.endDate, submissions);
+      const progress = computeProgress(publishedTasks, programEntry.assignedAt, program.endDate, submissions);
       percentSum += progress.percent;
       totalApproved += submissions.filter((s) => s.status === "APPROVED").length;
 

@@ -56,6 +56,39 @@ const DEFAULT_PROOF_FIELDS = [
 const getEffectiveProofFields = (task) =>
   (task.proofForm?.fields?.length > 0) ? task.proofForm.fields : DEFAULT_PROOF_FIELDS;
 
+/* -------------------- Interne : statut de publication d'une tâche (brouillon/programmée/publiée) -------------------- */
+/* Calcul synchrone, jamais bloqué par une écriture DB — une tâche SCHEDULED
+   dont l'heure est passée compte comme publiée immédiatement, que la
+   persistance ci-dessous (resolveScheduledTasks) ait déjà tourné ou non. */
+function isTaskPublished(task) {
+  if (task.status === "PUBLISHED") return true;
+  if (task.status === "SCHEDULED" && task.scheduledPublishAt && new Date(task.scheduledPublishAt) <= new Date()) return true;
+  return false;
+}
+
+const getPublishedTasks = (program) => (program.tasks || []).filter(isTaskPublished);
+exports.getPublishedTasks = getPublishedTasks;
+
+/* -------------------- Interne : republie en base les tâches SCHEDULED échues -------------------- */
+/* Même pattern que closeExpiredPrograms (volunteerProgramController.js) :
+   vérification paresseuse à la lecture plutôt qu'un cron. Best-effort — ne
+   fait jamais échouer l'appelant si l'update échoue (isTaskPublished reste
+   la source de vérité côté lecture, cette fonction ne fait que rattraper
+   le champ `status` stocké pour que l'affichage admin reste cohérent). */
+async function resolveScheduledTasks() {
+  try {
+    const Program = getVolunteerProgramModel();
+    await Program.updateMany(
+      { "tasks.status": "SCHEDULED", "tasks.scheduledPublishAt": { $lte: new Date() } },
+      { $set: { "tasks.$[t].status": "PUBLISHED" } },
+      { arrayFilters: [{ "t.status": "SCHEDULED", "t.scheduledPublishAt": { $lte: new Date() } }] }
+    );
+  } catch (error) {
+    console.error("⚠️ Erreur resolveScheduledTasks (ignorée) :", error.message);
+  }
+}
+exports.resolveScheduledTasks = resolveScheduledTasks;
+
 /* -------------------- Interne : recalcule et promeut le statut si le seuil est atteint -------------------- */
 /* Ne fait JAMAIS de rétrogradation (voir le plan) : ne touche ni "Refusé" ni
    un "Mission validée" déjà positionné, ne promeut que depuis "Non disponible". */
@@ -98,6 +131,7 @@ exports.submitTask = async (req, res, next) => {
 
     const task = (program.tasks || []).find((t) => t.id === taskId);
     if (!task) return res.status(404).json({ message: "Tâche introuvable" });
+    if (!isTaskPublished(task)) return res.status(409).json({ message: "Cette tâche n'est pas encore publiée" });
 
     let occurrenceKey = null;
     if (task.recurrence !== "ONCE") {
@@ -159,6 +193,7 @@ exports.uploadProofImage = async (req, res, next) => {
 exports.getMyProgramProgress = async (req, res, next) => {
   try {
     const { programId } = req.params;
+    await resolveScheduledTasks();
 
     const volunteer = await Volunteer.findById(req.user.id);
     if (!volunteer) return res.status(404).json({ message: "Profil introuvable" });
@@ -170,13 +205,15 @@ exports.getMyProgramProgress = async (req, res, next) => {
     const program = await Program.findById(programId).select("title tasks missionValidationThreshold endDate");
     if (!program) return res.status(404).json({ message: "Programme introuvable" });
 
+    const publishedTasks = getPublishedTasks(program);
+
     const Submission = getVolunteerTaskSubmissionModel();
     const submissions = await Submission.find({ programId, volunteerId: volunteer._id }).lean();
     const submissionByKey = new Map(
       submissions.map((s) => [`${s.taskId}|${s.occurrenceDate ? startOfDay(s.occurrenceDate).getTime() : "once"}`, s])
     );
 
-    const tasks = (program.tasks || []).map((task) => {
+    const tasks = publishedTasks.map((task) => {
       const due = getDueOccurrences(task, programEntry.assignedAt, program.endDate);
       const occurrences = due.map((occurrenceDate) => {
         const key = `${task.id}|${occurrenceDate ? occurrenceDate.getTime() : "once"}`;
@@ -195,7 +232,7 @@ exports.getMyProgramProgress = async (req, res, next) => {
       };
     });
 
-    const progress = computeProgress(program.tasks || [], programEntry.assignedAt, program.endDate, submissions);
+    const progress = computeProgress(publishedTasks, programEntry.assignedAt, program.endDate, submissions);
 
     res.json({
       programTitle: program.title,
@@ -306,9 +343,11 @@ exports.rejectSubmission = (req, res, next) => reviewSubmission(req, res, next, 
 exports.listProgramProgress = async (req, res, next) => {
   try {
     const { programId } = req.params;
+    await resolveScheduledTasks();
     const Program = getVolunteerProgramModel();
     const program = await Program.findById(programId).select("title tasks missionValidationThreshold endDate reviewerIds");
     if (!program) return res.status(404).json({ message: "Programme introuvable" });
+    const publishedTasks = getPublishedTasks(program);
 
     const volunteerQuery = { "programs.programId": programId };
 
@@ -334,7 +373,7 @@ exports.listProgramProgress = async (req, res, next) => {
     const items = volunteers.map((v) => {
       const programEntry = v.programs.find((p) => p.programId.toString() === programId);
       const submissions = submissionsByVolunteer.get(String(v._id)) || [];
-      const progress = computeProgress(program.tasks || [], programEntry.assignedAt, program.endDate, submissions);
+      const progress = computeProgress(publishedTasks, programEntry.assignedAt, program.endDate, submissions);
       return {
         volunteerId: v._id,
         nom: v.nom,
