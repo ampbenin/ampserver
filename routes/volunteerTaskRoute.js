@@ -26,5 +26,6 @@ router.get("/submissions", authMiddleware, ctrl.listSubmissions);
 router.patch("/submissions/:id/accept", authMiddleware, ctrl.approveSubmission);
 router.patch("/submissions/:id/reject", authMiddleware, ctrl.rejectSubmission);
 router.get("/programs/:programId/progress", authMiddleware, ctrl.listProgramProgress);
+router.post("/programs/:programId/finalize", authMiddleware, ctrl.finalizeMissions);
 
 module.exports = router;

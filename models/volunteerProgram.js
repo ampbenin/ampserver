@@ -109,11 +109,17 @@ const VolunteerProgramSchema = new mongoose.Schema(
     ],
 
     // % d'occurrences de tâches dues et approuvées à partir duquel le statut
-    // du volontaire sur ce programme passe automatiquement à "Mission
-    // validée" (voir volunteerTaskController.reviewSubmission) — ne
-    // s'applique que si `tasks` n'est pas vide, et ne rétrograde jamais un
-    // statut déjà positionné manuellement.
+    // du volontaire sur ce programme passe à "Mission validée" au moment de
+    // "Terminer les missions" (voir volunteerTaskController.finalizeMissions)
+    // — ne s'applique que si `tasks` n'est pas vide, et ne rétrograde jamais
+    // un statut déjà positionné manuellement.
     missionValidationThreshold: { type: Number, default: 100, min: 0, max: 100 },
+
+    // Posé une seule fois par "Terminer les missions" (action manuelle,
+    // irréversible) — bascule d'un coup tous les volontaires "Non
+    // disponible" de ce programme vers "Mission validée" ou "Refusé" selon
+    // le seuil, et bloque toute nouvelle soumission de tâche au-delà.
+    missionsFinalizedAt: { type: Date, default: null },
   },
   { timestamps: true }
 );

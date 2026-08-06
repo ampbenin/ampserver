@@ -89,28 +89,6 @@ async function resolveScheduledTasks() {
 }
 exports.resolveScheduledTasks = resolveScheduledTasks;
 
-/* -------------------- Interne : recalcule et promeut le statut si le seuil est atteint -------------------- */
-/* Ne fait JAMAIS de rétrogradation (voir le plan) : ne touche ni "Refusé" ni
-   un "Mission validée" déjà positionné, ne promeut que depuis "Non disponible". */
-async function recalculateMissionStatus(program, volunteerId) {
-  if (!program.tasks || program.tasks.length === 0) return;
-
-  const volunteer = await Volunteer.findById(volunteerId);
-  if (!volunteer) return;
-
-  const programEntry = volunteer.programs.find((p) => p.programId.toString() === program._id.toString());
-  if (!programEntry || programEntry.statut !== "Non disponible") return;
-
-  const Submission = getVolunteerTaskSubmissionModel();
-  const submissions = await Submission.find({ programId: program._id, volunteerId }).lean();
-  const { percent } = computeProgress(program.tasks, programEntry.assignedAt, program.endDate, submissions);
-
-  if (percent >= program.missionValidationThreshold) {
-    programEntry.statut = "Mission validée";
-    await volunteer.save();
-  }
-}
-
 /* -------------------- Protégé (Mon espace) : soumettre une preuve -------------------- */
 exports.submitTask = async (req, res, next) => {
   try {
@@ -128,6 +106,9 @@ exports.submitTask = async (req, res, next) => {
     const Program = getVolunteerProgramModel();
     const program = await Program.findById(programId);
     if (!program) return res.status(404).json({ message: "Programme introuvable" });
+    if (program.missionsFinalizedAt) {
+      return res.status(409).json({ message: "Les missions de ce programme sont terminées, plus aucune soumission n'est acceptée" });
+    }
 
     const task = (program.tasks || []).find((t) => t.id === taskId);
     if (!task) return res.status(404).json({ message: "Tâche introuvable" });
@@ -326,9 +307,10 @@ async function reviewSubmission(req, res, next, newStatus) {
     submission.reviewNote = reviewNote;
     await submission.save();
 
-    if (newStatus === "APPROVED") {
-      await recalculateMissionStatus(program, submission.volunteerId);
-    }
+    // Plus de promotion automatique en direct ici — le statut mission
+    // (validée/refusée) ne se décide qu'au moment où le staff clique sur
+    // "Terminer les missions" (voir exports.finalizeMissions), qui évalue
+    // tous les volontaires du programme d'un coup.
 
     res.json({ message: newStatus === "APPROVED" ? "Tâche approuvée" : "Tâche rejetée" });
   } catch (error) {
@@ -385,6 +367,67 @@ exports.listProgramProgress = async (req, res, next) => {
     });
 
     res.json({ items, missionValidationThreshold: program.missionValidationThreshold });
+  } catch (error) {
+    next(error);
+  }
+};
+
+/* -------------------- Staff : terminer les missions d'un programme (irréversible) -------------------- */
+/* Bascule d'un coup tous les volontaires "Non disponible" de ce programme
+   vers "Mission validée" (seuil atteint) ou "Refusé" (sinon) — c'est
+   désormais le SEUL moment où ce statut se décide (reviewSubmission ne
+   fait plus aucune promotion en direct à chaque approbation, voir plus
+   haut). Ne touche jamais un statut déjà "Mission validée"/"Refusé"
+   positionné manuellement avant. Autorisation via canReviewProgram —
+   action de gestion de programme, jamais les superviseurs (suivi de
+   tâches uniquement). Bloque aussi toute nouvelle soumission ensuite
+   (voir submitTask). */
+exports.finalizeMissions = async (req, res, next) => {
+  try {
+    const { programId } = req.params;
+    const Program = getVolunteerProgramModel();
+    const program = await Program.findById(programId)
+      .select("tasks endDate missionValidationThreshold missionsFinalizedAt reviewerIds");
+    if (!program) return res.status(404).json({ message: "Programme introuvable" });
+    if (!canReviewProgram(program, req.user)) {
+      return res.status(403).json({ message: "Vous n'êtes pas autorisé à gérer ce programme" });
+    }
+    if (program.missionsFinalizedAt) {
+      return res.status(409).json({ message: "Les missions de ce programme ont déjà été terminées" });
+    }
+
+    const publishedTasks = getPublishedTasks(program);
+    if (publishedTasks.length === 0) {
+      return res.status(400).json({ message: "Ce programme n'a aucune tâche publiée à évaluer" });
+    }
+
+    const volunteers = await Volunteer.find({ "programs.programId": programId });
+    const Submission = getVolunteerTaskSubmissionModel();
+
+    let validated = 0;
+    let refused = 0;
+
+    for (const volunteer of volunteers) {
+      const programEntry = volunteer.programs.find((p) => p.programId.toString() === programId);
+      if (!programEntry || programEntry.statut !== "Non disponible") continue; // jamais de rétrogradation
+
+      const submissions = await Submission.find({ programId, volunteerId: volunteer._id }).lean();
+      const { percent } = computeProgress(publishedTasks, programEntry.assignedAt, program.endDate, submissions);
+
+      if (percent >= program.missionValidationThreshold) {
+        programEntry.statut = "Mission validée";
+        validated += 1;
+      } else {
+        programEntry.statut = "Refusé";
+        refused += 1;
+      }
+      await volunteer.save();
+    }
+
+    program.missionsFinalizedAt = new Date();
+    await program.save();
+
+    res.json({ validated, refused });
   } catch (error) {
     next(error);
   }
