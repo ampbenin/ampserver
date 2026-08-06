@@ -12,6 +12,7 @@ const getCoordinationCommunaleModel = require("../../models/gestionamp/Coordinat
 const getInstitutionSpecialiseeModel = require("../../models/gestionamp/InstitutionSpecialisee");
 const jwtConfig = require("../../config/jwt");
 const resend = require("../../utils/resendMailer");
+const { logPartnerActivity } = require("../../utils/partnerActivityLogger");
 
 /**
  * Génération du token JWT.
@@ -55,6 +56,12 @@ exports.login = async (req, res) => {
     }
 
     const token = generateToken(user);
+
+    // Suivi d'activité des comptes PARTENAIRE — voir utils/partnerActivityLogger.js.
+    // Ne concerne aucun autre rôle, n'affecte jamais la réponse de connexion.
+    if (user.role === "PARTENAIRE") {
+      await logPartnerActivity({ partnerId: user._id, action: "LOGIN" });
+    }
 
     return res.json({
       token,

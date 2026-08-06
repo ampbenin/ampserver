@@ -30,4 +30,8 @@ router.post("/me/logo", ...requirePartner, upload.single("file"), ctrl.uploadPar
 router.get("/programs/:programId/comments", ...requireStaff, ctrl.listPartnerComments);
 router.patch("/comments/:commentId/reply", ...requireStaff, ctrl.replyToComment);
 
+// 🔐 Staff — suivi d'activité des partenaires (connexion + actions)
+router.get("/admin/activity-summary", ...requireStaff, ctrl.getPartnerActivitySummary);
+router.get("/admin/partners/:partnerId/activity", ...requireStaff, ctrl.getPartnerActivityTimeline);
+
 module.exports = router;

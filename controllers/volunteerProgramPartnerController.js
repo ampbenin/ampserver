@@ -14,12 +14,14 @@ const getVolunteerProgramModel = require("../models/volunteerProgram");
 const getVolunteerTaskSubmissionModel = require("../models/volunteerTaskSubmission");
 const getVolunteerApplicationModel = require("../models/volunteerApplication");
 const getVolunteerProgramPartnerCommentModel = require("../models/volunteerProgramPartnerComment");
+const getPartnerActivityLogModel = require("../models/partnerActivityLog");
 const getUserModel = require("../models/gestionamp/User");
 const Volunteer = require("../models/volunteer");
 const cloudinary = require("../utils/cloudinary");
 const { computeProgress } = require("../utils/volunteerTaskLogic");
 const { getEffectiveProofFields } = require("./volunteerTaskController");
 const { buildApplicationFilterQuery, parsePagination } = require("./volunteerApplicationController");
+const { logPartnerActivity } = require("../utils/partnerActivityLogger");
 
 // Candidatures visibles par un partenaire : jamais les rejetées (contiennent
 // les coordonnées de personnes non retenues, décision confirmée avec
@@ -41,6 +43,11 @@ exports.listMyPartnerPrograms = async (req, res, next) => {
     const Program = getVolunteerProgramModel();
     const programs = await Program.find({ _id: { $in: partner?.partnerProgramIds || [] } })
       .select("title location startDate endDate status");
+
+    // Appelé une seule fois au montage du dashboard (voir PartnerDashboard.jsx) —
+    // meilleur proxy disponible pour "une session vient de s'ouvrir".
+    await logPartnerActivity({ partnerId: req.user.id, action: "OPEN_DASHBOARD" });
+
     res.json({ items: programs });
   } catch (error) {
     next(error);
@@ -112,6 +119,8 @@ exports.getPartnerProgramStats = async (req, res, next) => {
       }
     }
 
+    await logPartnerActivity({ partnerId: req.user.id, programId, action: "VIEW_STATS" });
+
     res.json({
       program: {
         title: program.title, description: program.description, location: program.location,
@@ -173,6 +182,15 @@ exports.listPartnerApplications = async (req, res, next) => {
       Application.countDocuments(query),
     ]);
 
+    // Le plus direct des signaux "qu'est-ce qu'il aime vérifier" — quels
+    // filtres/recherches un partenaire utilise réellement sur les candidatures.
+    await logPartnerActivity({
+      partnerId: req.user.id,
+      programId,
+      action: "VIEW_APPLICATIONS",
+      metadata: { search: search || null, status: status || null, dateFrom: dateFrom || null, dateTo: dateTo || null, hasFieldFilters: !!fieldFilters },
+    });
+
     res.json({ items, total, page, totalPages: Math.max(1, Math.ceil(total / limit)) });
   } catch (error) {
     next(error);
@@ -195,6 +213,8 @@ exports.uploadPartnerLogo = async (req, res, next) => {
     const User = getUserModel();
     await User.findByIdAndUpdate(req.user.id, { partnerLogoUrl: uploaded.secure_url });
 
+    await logPartnerActivity({ partnerId: req.user.id, action: "UPLOAD_LOGO" });
+
     res.status(201).json({ url: uploaded.secure_url });
   } catch (error) {
     next(error);
@@ -213,6 +233,9 @@ exports.submitPartnerComment = async (req, res, next) => {
 
     const Comment = getVolunteerProgramPartnerCommentModel();
     await Comment.create({ programId, partnerId: req.user.id, text: text.trim() });
+
+    await logPartnerActivity({ partnerId: req.user.id, programId, action: "POST_COMMENT" });
+
     res.status(201).json({ message: "Commentaire envoyé" });
   } catch (error) {
     next(error);
@@ -409,6 +432,9 @@ exports.downloadImpactReport = async (req, res, next) => {
 
     const pdfBytes = await pdfDoc.save();
     const slug = program.title.toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "").replace(/[^a-z0-9]+/g, "-").replace(/(^-|-$)/g, "");
+
+    await logPartnerActivity({ partnerId: req.user.id, programId, action: "DOWNLOAD_REPORT" });
+
     res.setHeader("Content-Type", "application/pdf");
     res.setHeader("Content-Disposition", `attachment; filename="rapport-impact-${slug || "programme"}.pdf"`);
     res.send(Buffer.from(pdfBytes));
@@ -430,3 +456,96 @@ function truncateForPdf(text, maxLength) {
 function toWinAnsiSafe(text) {
   return [...String(text)].filter((ch) => ch.codePointAt(0) <= 0xff).join("");
 }
+
+/* ==================== Staff (ADMIN/EDITOR) : suivi d'activité des partenaires ==================== */
+/* Pour savoir qui s'intéresse au programme et ce qu'il aime vérifier — voir
+   utils/partnerActivityLogger.js pour les points d'instrumentation. */
+
+const ONLINE_THRESHOLD_MS = 5 * 60 * 1000; // "En ligne" si actif il y a moins de 5 min
+
+/* -------------------- Staff : vue d'ensemble (tous partenaires, ou scopée à un programme) -------------------- */
+exports.getPartnerActivitySummary = async (req, res, next) => {
+  try {
+    const { programId } = req.query;
+    const User = getUserModel();
+
+    const userQuery = { role: "PARTENAIRE" };
+    if (programId) userQuery.partnerProgramIds = programId;
+    const partners = await User.find(userQuery).select("name email partnerProgramIds");
+
+    if (partners.length === 0) return res.json({ items: [] });
+
+    const Log = getPartnerActivityLogModel();
+    const partnerIds = partners.map((p) => p._id);
+    // lastActiveAt/isOnline reflètent TOUJOURS l'activité du compte entière
+    // (pas seulement ce programme) — "connecté" est une notion de compte,
+    // pas de programme. Les compteurs d'actions, eux, sont scopés si programId fourni.
+    const allLogs = await Log.find({ partnerId: { $in: partnerIds } })
+      .select("partnerId programId action createdAt").sort({ createdAt: -1 }).lean();
+
+    const Program = getVolunteerProgramModel();
+    const allProgramIds = [...new Set(partners.flatMap((p) => (p.partnerProgramIds || []).map(String)))];
+    const programs = await Program.find({ _id: { $in: allProgramIds } }).select("title");
+    const programTitleById = new Map(programs.map((p) => [String(p._id), p.title]));
+
+    const now = Date.now();
+    const items = partners.map((partner) => {
+      const ownLogs = allLogs.filter((l) => String(l.partnerId) === String(partner._id));
+      const scopedLogs = programId ? ownLogs.filter((l) => String(l.programId) === String(programId)) : ownLogs;
+      const lastActiveAt = ownLogs.length > 0 ? ownLogs[0].createdAt : null; // déjà trié desc
+      const actionCounts = {};
+      scopedLogs.forEach((l) => { actionCounts[l.action] = (actionCounts[l.action] || 0) + 1; });
+
+      return {
+        partnerId: partner._id,
+        name: partner.name,
+        email: partner.email,
+        programs: (partner.partnerProgramIds || []).map((id) => programTitleById.get(String(id)) || "?"),
+        lastActiveAt,
+        isOnline: lastActiveAt ? now - new Date(lastActiveAt).getTime() < ONLINE_THRESHOLD_MS : false,
+        totalActions: scopedLogs.length,
+        actionCounts,
+      };
+    });
+
+    res.json({ items });
+  } catch (error) {
+    next(error);
+  }
+};
+
+/* -------------------- Staff : historique détaillé d'un partenaire (drill-down) -------------------- */
+exports.getPartnerActivityTimeline = async (req, res, next) => {
+  try {
+    const { partnerId } = req.params;
+    const { programId } = req.query;
+
+    const query = { partnerId };
+    if (programId) query.programId = programId;
+
+    const Log = getPartnerActivityLogModel();
+    const { page, limit } = parsePagination(req.query, 20);
+
+    const [logs, total] = await Promise.all([
+      Log.find(query).sort({ createdAt: -1 }).skip((page - 1) * limit).limit(limit),
+      Log.countDocuments(query),
+    ]);
+
+    const Program = getVolunteerProgramModel();
+    const programIds = [...new Set(logs.filter((l) => l.programId).map((l) => String(l.programId)))];
+    const programs = programIds.length > 0 ? await Program.find({ _id: { $in: programIds } }).select("title") : [];
+    const programTitleById = new Map(programs.map((p) => [String(p._id), p.title]));
+
+    const items = logs.map((l) => ({
+      _id: l._id,
+      action: l.action,
+      programTitle: l.programId ? programTitleById.get(String(l.programId)) || "?" : null,
+      metadata: l.metadata,
+      createdAt: l.createdAt,
+    }));
+
+    res.json({ items, total, page, totalPages: Math.max(1, Math.ceil(total / limit)) });
+  } catch (error) {
+    next(error);
+  }
+};
