@@ -1,7 +1,10 @@
 /**
- * Contrôleur "Réglages du site" — logo AMP BENIN + bannière "Barre des
- * partenaires", pilotés depuis l'espace ADMIN (voir models/siteSettings.js
- * pour le contexte et les consommateurs).
+ * Contrôleur "Réglages du site" — logo AMP BENIN, piloté depuis l'espace
+ * ADMIN (voir models/siteSettings.js pour le contexte et les
+ * consommateurs ; la bannière "Barre des partenaires" a été déplacée vers
+ * VolunteerProgram.partnersBarImageUrl, voir
+ * controllers/volunteerProgramController.js#uploadPartnersBarImage —
+ * propre à chaque programme, pas un réglage global).
  */
 
 const streamifier = require("streamifier");
@@ -25,22 +28,21 @@ const uploadToCloudinary = (buffer) =>
   });
 
 /* -------------------- Public : lecture des réglages -------------------- */
-/* Pas d'authentification — ces images sont de toute façon publiques une
-   fois affichées (tableau de bord partenaire, PDF). Lu par
-   PartnerDashboard.jsx et downloadImpactReport (jamais le site public). */
+/* Pas d'authentification — cette image est de toute façon publique une
+   fois affichée (tableau de bord partenaire, PDF). Lu par
+   PartnerDashboard.jsx et downloadImpactReport. */
 exports.getSiteSettings = async (req, res, next) => {
   try {
     const settings = await getOrCreateSettings();
-    res.json({ ampLogoUrl: settings.ampLogoUrl, partnersBarImageUrl: settings.partnersBarImageUrl });
+    res.json({ ampLogoUrl: settings.ampLogoUrl });
   } catch (error) {
     next(error);
   }
 };
 
 /* -------------------- ADMIN uniquement : mise à jour -------------------- */
-/* Accepte 0, 1 ou 2 fichiers (champs multipart "ampLogo" et/ou
-   "partnersBar", voir multer.fields dans la route) — ne touche que les
-   champs effectivement fournis, jamais d'écrasement accidentel de l'autre. */
+/* Accepte 0 ou 1 fichier (champ multipart "ampLogo", voir multer.fields
+   dans la route). */
 exports.updateSiteSettings = async (req, res, next) => {
   try {
     const settings = await getOrCreateSettings();
@@ -50,14 +52,10 @@ exports.updateSiteSettings = async (req, res, next) => {
       const uploaded = await uploadToCloudinary(files.ampLogo[0].buffer);
       settings.ampLogoUrl = uploaded.secure_url;
     }
-    if (files.partnersBar?.[0]) {
-      const uploaded = await uploadToCloudinary(files.partnersBar[0].buffer);
-      settings.partnersBarImageUrl = uploaded.secure_url;
-    }
     settings.updatedBy = req.user.id;
     await settings.save();
 
-    res.json({ ampLogoUrl: settings.ampLogoUrl, partnersBarImageUrl: settings.partnersBarImageUrl });
+    res.json({ ampLogoUrl: settings.ampLogoUrl });
   } catch (error) {
     next(error);
   }

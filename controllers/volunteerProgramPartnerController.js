@@ -66,7 +66,7 @@ async function computeProgramSnapshot(programId) {
   await resolveScheduledTasks();
   const Program = getVolunteerProgramModel();
   const program = await Program.findById(programId)
-    .select("title description location startDate endDate tasks missionValidationThreshold applicationForm");
+    .select("title description location startDate endDate tasks missionValidationThreshold applicationForm partnersBarImageUrl");
   if (!program) return null;
   const publishedTasks = getPublishedTasks(program);
 
@@ -154,6 +154,10 @@ exports.getPartnerProgramStats = async (req, res, next) => {
         title: snapshot.program.title, description: snapshot.program.description, location: snapshot.program.location,
         startDate: snapshot.program.startDate, endDate: snapshot.program.endDate,
         applicationFormFields: snapshot.program.applicationForm?.fields || [],
+        // Propre à CE programme (voir models/volunteerProgram.js) — jamais
+        // un réglage global, seuls les partenaires qui suivent CE
+        // programme la verront.
+        partnersBarImageUrl: snapshot.program.partnersBarImageUrl || null,
       },
       stats: snapshot.stats,
       validatedVolunteers: snapshot.validatedVolunteers,
@@ -382,7 +386,7 @@ exports.downloadImpactReport = async (req, res, next) => {
 
     const Program = getVolunteerProgramModel();
     const programDoc = onlyBeneficiaries
-      ? await Program.findById(programId).select("title description location startDate endDate")
+      ? await Program.findById(programId).select("title description location startDate endDate partnersBarImageUrl")
       : snapshot.program;
     if (!programDoc) return res.status(404).json({ message: "Programme introuvable" });
 
@@ -409,6 +413,10 @@ exports.downloadImpactReport = async (req, res, next) => {
     const User = getUserModel();
     const partner = await User.findById(req.user.id).select("name partnerLogoUrl");
 
+    // ampLogoUrl reste un réglage global (marque AMP BENIN, identique pour
+    // tous) — partnersBarImageUrl en revanche vient du PROGRAMME lui-même
+    // (programDoc), jamais de SiteSettings : propre à chaque programme,
+    // voir models/volunteerProgram.js#partnersBarImageUrl.
     const SiteSettings = getSiteSettingsModel();
     const settings = await SiteSettings.findOne();
 
@@ -422,7 +430,7 @@ exports.downloadImpactReport = async (req, res, next) => {
       },
       partner: { name: partner?.name, partnerLogoUrl: partner?.partnerLogoUrl },
       ampLogoUrl: settings?.ampLogoUrl || null,
-      partnersBarImageUrl: settings?.partnersBarImageUrl || null,
+      partnersBarImageUrl: programDoc.partnersBarImageUrl || null,
       stats: snapshot?.stats,
       validatedVolunteers: snapshot?.validatedVolunteers,
       progressOverTime: snapshot?.progressOverTime,

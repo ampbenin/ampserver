@@ -20,10 +20,7 @@ router.patch(
   "/",
   authMiddleware,
   roleMiddleware("ADMIN"),
-  upload.fields([
-    { name: "ampLogo", maxCount: 1 },
-    { name: "partnersBar", maxCount: 1 },
-  ]),
+  upload.fields([{ name: "ampLogo", maxCount: 1 }]),
   ctrl.updateSiteSettings
 );
 

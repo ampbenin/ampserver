@@ -8,10 +8,12 @@
  * programme, plus des reviewerIds optionnels), pas de leçons.
  */
 
+const streamifier = require("streamifier");
 const getVolunteerProgramModel = require("../models/volunteerProgram");
 const getVolunteerApplicationModel = require("../models/volunteerApplication");
 const getUserModel = require("../models/gestionamp/User");
 const { ensureBuiltinFields, validateFormFieldsDefinition } = require("../utils/applicationFormLogic");
+const cloudinary = require("../utils/cloudinary");
 
 // Format hex strict (#RRGGBB) — cette valeur est réinjectée telle quelle dans
 // une balise <style> côté candidat, donc on ne stocke jamais autre chose
@@ -316,6 +318,34 @@ exports.setPartnerAccess = async (req, res, next) => {
     await partner.save();
 
     res.json({ message: "Accès partenaire mis à jour", partnerProgramIds: partner.partnerProgramIds });
+  } catch (error) {
+    next(error);
+  }
+};
+
+/* -------------------- ADMIN/EDITOR : bannière "Barre des partenaires" de CE programme -------------------- */
+/* Propre à chaque programme (voir models/volunteerProgram.js#partnersBarImageUrl
+   pour le contexte) — seuls les partenaires suivant CE programme la
+   verront, jamais un réglage global. */
+exports.uploadPartnersBarImage = async (req, res, next) => {
+  try {
+    const Program = getVolunteerProgramModel();
+    const program = await Program.findById(req.params.id);
+    if (!program) return res.status(404).json({ message: "Programme introuvable" });
+    if (!req.file) return res.status(400).json({ message: "Aucun fichier reçu" });
+
+    const uploaded = await new Promise((resolve, reject) => {
+      const uploadStream = cloudinary.uploader.upload_stream(
+        { folder: "ong-site/program-partners-bar", resource_type: "image" },
+        (error, result) => (error ? reject(error) : resolve(result))
+      );
+      streamifier.createReadStream(req.file.buffer).pipe(uploadStream);
+    });
+
+    program.partnersBarImageUrl = uploaded.secure_url;
+    await program.save();
+
+    res.json({ message: "Barre des partenaires mise à jour", partnersBarImageUrl: program.partnersBarImageUrl });
   } catch (error) {
     next(error);
   }

@@ -1,4 +1,5 @@
 const express = require("express");
+const multer = require("multer");
 const router = express.Router();
 
 const ctrl = require("../controllers/volunteerProgramController");
@@ -6,6 +7,12 @@ const authMiddleware = require("../middlewares/gestionamp/authMiddleware");
 const roleMiddleware = require("../middlewares/gestionamp/roleMiddleware");
 
 const requireStaff = [authMiddleware, roleMiddleware("ADMIN", "EDITOR")];
+
+const upload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 10 * 1024 * 1024 },
+  fileFilter: (req, file, cb) => cb(null, file.mimetype.startsWith("image/")),
+});
 
 // 🌐 Public — catalogue des programmes publiés + schéma du formulaire de candidature
 router.get("/", ctrl.listPublicPrograms);
@@ -20,5 +27,6 @@ router.put("/:id", ...requireStaff, ctrl.updateProgramMeta);
 router.delete("/:id", ...requireStaff, ctrl.deleteProgram);
 router.patch("/:id/supervisors", ...requireStaff, ctrl.setSupervisorAssignment);
 router.patch("/:id/partners", ...requireStaff, ctrl.setPartnerAccess);
+router.post("/:id/partners-bar", ...requireStaff, upload.single("file"), ctrl.uploadPartnersBarImage);
 
 module.exports = router;

@@ -120,6 +120,16 @@ const VolunteerProgramSchema = new mongoose.Schema(
     // disponible" de ce programme vers "Mission validée" ou "Refusé" selon
     // le seuil, et bloque toute nouvelle soumission de tâche au-delà.
     missionsFinalizedAt: { type: Date, default: null },
+
+    // Bannière "Barre des partenaires" — propre à CE programme (corrigé le
+    // 2026-08-07 : d'abord posée comme réglage global dans SiteSettings,
+    // puis l'utilisateur a précisé "c'est une image propre à chaque
+    // programme, seuls les partenaires où ce programme a été affecté
+    // verront ça"). Définie par un ADMIN/EDITOR (onglet "Partenaires" de
+    // VolunteerProgramEditor.jsx), affichée tout en bas du tableau de bord
+    // d'un partenaire suivant CE programme + sur chaque page du rapport
+    // PDF de CE programme — jamais mélangée avec un autre programme.
+    partnersBarImageUrl: { type: String, default: null },
   },
   { timestamps: true }
 );

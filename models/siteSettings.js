@@ -8,13 +8,15 @@
  * réglage administratif, pas une donnée d'identité volontaire (qui vit sur
  * la connexion par défaut).
  *
- * Consommateurs actuels — l'espace PARTENAIRE uniquement, jamais le site
- * public (correction du 2026-08-07 : un premier placement de la barre des
- * partenaires dans le footer public a été retiré sur demande explicite de
- * l'utilisateur, "ça concerne uniquement l'espace du partenaire") :
- * - PartnerDashboard.jsx : ampLogoUrl (à côté du logo du partenaire, en
- *   en-tête) + partnersBarImageUrl (tout en bas de CE tableau de bord).
- * - utils/partnerReportPdf.js : les deux, sur chaque page du rapport PDF.
+ * N'a plus contenu qu'ampLogoUrl depuis le 2026-08-07 : ce modèle portait
+ * aussi `partnersBarImageUrl`, mais l'utilisateur a précisé que cette
+ * bannière est propre à CHAQUE PROGRAMME (seuls les partenaires suivant ce
+ * programme doivent la voir), pas un réglage global — déplacée vers
+ * `VolunteerProgram.partnersBarImageUrl` (voir models/volunteerProgram.js).
+ *
+ * Consommateurs actuels :
+ * - PartnerDashboard.jsx : ampLogoUrl, à côté du logo du partenaire en en-tête.
+ * - utils/partnerReportPdf.js : ampLogoUrl, sur chaque page du rapport PDF.
  */
 
 const mongoose = require("mongoose");
@@ -25,14 +27,10 @@ const SiteSettingsSchema = new mongoose.Schema(
     // Cloudinary fixe dans Footer.astro/Header.astro) ; ce champ ne
     // remplace PAS ces usages existants, il alimente les NOUVEAUX endroits
     // qui ont besoin du logo AMP BENIN piloté depuis l'admin (espace
-    // partenaire, PDF).
+    // partenaire, PDF). Volontairement global (un seul logo AMP BENIN pour
+    // tout le monde), contrairement à la bannière "Barre des partenaires"
+    // qui est propre à chaque programme.
     ampLogoUrl: { type: String, default: null },
-
-    // Bannière "Barre des partenaires" — UNE seule image composée par
-    // l'ADMIN (pas une génération dynamique à partir des logos de chaque
-    // partenaire), affichée en pleine largeur tout en bas de l'espace
-    // PARTENAIRE (PartnerDashboard.jsx) — jamais le site public.
-    partnersBarImageUrl: { type: String, default: null },
 
     updatedBy: { type: mongoose.Schema.Types.ObjectId, ref: "GestionAmpUser", default: null },
   },
