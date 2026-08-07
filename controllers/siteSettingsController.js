@@ -26,8 +26,8 @@ const uploadToCloudinary = (buffer) =>
 
 /* -------------------- Public : lecture des réglages -------------------- */
 /* Pas d'authentification — ces images sont de toute façon publiques une
-   fois affichées (footer du site, tableau de bord partenaire, PDF). Lu par
-   Footer.astro (fetch SSR), PartnerDashboard.jsx, et downloadImpactReport. */
+   fois affichées (tableau de bord partenaire, PDF). Lu par
+   PartnerDashboard.jsx et downloadImpactReport (jamais le site public). */
 exports.getSiteSettings = async (req, res, next) => {
   try {
     const settings = await getOrCreateSettings();

@@ -8,9 +8,12 @@
  * réglage administratif, pas une donnée d'identité volontaire (qui vit sur
  * la connexion par défaut).
  *
- * Consommateurs actuels :
- * - Footer.astro (site public) : partnersBarImageUrl, tout en bas du site.
- * - PartnerDashboard.jsx : ampLogoUrl, affiché à côté du logo du partenaire.
+ * Consommateurs actuels — l'espace PARTENAIRE uniquement, jamais le site
+ * public (correction du 2026-08-07 : un premier placement de la barre des
+ * partenaires dans le footer public a été retiré sur demande explicite de
+ * l'utilisateur, "ça concerne uniquement l'espace du partenaire") :
+ * - PartnerDashboard.jsx : ampLogoUrl (à côté du logo du partenaire, en
+ *   en-tête) + partnersBarImageUrl (tout en bas de CE tableau de bord).
  * - utils/partnerReportPdf.js : les deux, sur chaque page du rapport PDF.
  */
 
@@ -27,7 +30,8 @@ const SiteSettingsSchema = new mongoose.Schema(
 
     // Bannière "Barre des partenaires" — UNE seule image composée par
     // l'ADMIN (pas une génération dynamique à partir des logos de chaque
-    // partenaire), affichée en pleine largeur tout en bas du site public.
+    // partenaire), affichée en pleine largeur tout en bas de l'espace
+    // PARTENAIRE (PartnerDashboard.jsx) — jamais le site public.
     partnersBarImageUrl: { type: String, default: null },
 
     updatedBy: { type: mongoose.Schema.Types.ObjectId, ref: "GestionAmpUser", default: null },
