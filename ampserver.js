@@ -74,6 +74,10 @@ app.use("/api/volunteer-partner", require("./routes/volunteerProgramPartnerRoute
 // Discipline & sanctions des volontaires (signalement, avertissement/
 // suspension/bannissement, liste noire inter-programmes).
 app.use("/api/volunteer-discipline", require("./routes/volunteerDisciplineRoute"));
+
+// Réglages du site (logo AMP BENIN, bannière "Barre des partenaires") —
+// lecture publique, écriture ADMIN uniquement (voir models/siteSettings.js).
+app.use("/api/site-settings", require("./routes/siteSettingsRoute"));
 app.use("/api/newsletter", newsletterRoutes);
 app.use("/api/contact", contactRoutes);
 app.use("/api/partner-form", partnerRoutes);

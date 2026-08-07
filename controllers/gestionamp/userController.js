@@ -3,9 +3,11 @@
  * Accès strictement réservé aux ADMIN
  */
 
+const streamifier = require("streamifier");
 const getUserModel = require("../../models/gestionamp/User");
 const getCoordinationCommunaleModel = require("../../models/gestionamp/CoordinationCommunale");
 const getInstitutionSpecialiseeModel = require("../../models/gestionamp/InstitutionSpecialisee");
+const cloudinary = require("../../utils/cloudinary");
 
 /**
  * @route POST /gestionamp/api/users
@@ -154,6 +156,47 @@ exports.toggleUserStatus = async (req, res) => {
         user.isActive ? "activé" : "désactivé"
       } avec succès`,
     });
+  } catch (error) {
+    res.status(500).json({
+      message: "Erreur serveur",
+      error: error.message,
+    });
+  }
+};
+
+/**
+ * @route POST /gestionamp/api/users/:id/partner-logo
+ * @desc ADMIN définit/corrige le logo d'un compte PARTENAIRE en particulier
+ *       — en plus du self-service déjà existant côté partenaire
+ *       (POST /api/volunteer-partner/me/logo), pour les cas où le
+ *       partenaire ne gère pas lui-même son compte.
+ */
+exports.uploadPartnerLogoForUser = async (req, res) => {
+  try {
+    const User = getUserModel();
+    const user = await User.findById(req.params.id);
+    if (!user) {
+      return res.status(404).json({ message: "Utilisateur introuvable" });
+    }
+    if (user.role !== "PARTENAIRE") {
+      return res.status(400).json({ message: "Ce compte n'est pas un partenaire" });
+    }
+    if (!req.file) {
+      return res.status(400).json({ message: "Aucun fichier reçu" });
+    }
+
+    const uploaded = await new Promise((resolve, reject) => {
+      const uploadStream = cloudinary.uploader.upload_stream(
+        { folder: "ong-site/partner-logos", resource_type: "image" },
+        (error, result) => (error ? reject(error) : resolve(result))
+      );
+      streamifier.createReadStream(req.file.buffer).pipe(uploadStream);
+    });
+
+    user.partnerLogoUrl = uploaded.secure_url;
+    await user.save();
+
+    res.json({ message: "Logo du partenaire mis à jour", partnerLogoUrl: user.partnerLogoUrl });
   } catch (error) {
     res.status(500).json({
       message: "Erreur serveur",

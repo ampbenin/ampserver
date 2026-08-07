@@ -11,6 +11,7 @@ const mongoose = require("mongoose");
 const streamifier = require("streamifier");
 const { buildPartnerImpactReportPdf } = require("../utils/partnerReportPdf");
 const getVolunteerProgramModel = require("../models/volunteerProgram");
+const getSiteSettingsModel = require("../models/siteSettings");
 const getVolunteerTaskSubmissionModel = require("../models/volunteerTaskSubmission");
 const getVolunteerApplicationModel = require("../models/volunteerApplication");
 const getVolunteerProgramPartnerCommentModel = require("../models/volunteerProgramPartnerComment");
@@ -343,15 +344,24 @@ exports.replyToComment = async (req, res, next) => {
 /* -------------------- Protégé (PARTENAIRE) : rapport d'impact PDF, généré à la demande -------------------- */
 /* Reprend TOUT ce que le partenaire voit sur son tableau de bord (voir
    src/components/gestionamp/dashboard/partenaire/PartnerDashboard.jsx) :
-   chiffres clés, progression dans le temps, candidatures reçues (jamais
-   les rejetées, même restriction que listPartnerApplications), volontaires
-   à mission validée + détail de leurs tâches approuvées, aperçu en images,
-   et ses échanges avec l'équipe. La construction du PDF lui-même (mise en
-   page, pagination, tableaux, mini bar chart) vit dans
-   utils/partnerReportPdf.js — ce contrôleur ne fait que rassembler les
-   données, à l'identique de getPartnerProgramStats (même
-   computeProgramSnapshot, pour ne jamais afficher des chiffres différents
-   entre le tableau de bord et le PDF). */
+   chiffres clés, progression dans le temps, liste des bénéficiaires (jamais
+   les rejetées, même restriction que listPartnerApplications — visible
+   dans le PDF seulement si demandé, voir includeBeneficiaries/
+   onlyBeneficiaries ci-dessous), volontaires à mission validée + détail de
+   leurs tâches approuvées, aperçu en images, et ses échanges avec l'équipe.
+   La construction du PDF lui-même (mise en page, pagination, tableaux,
+   mini bar chart, logos sur chaque page) vit dans utils/partnerReportPdf.js
+   — ce contrôleur ne fait que rassembler les données, à l'identique de
+   getPartnerProgramStats (même computeProgramSnapshot, pour ne jamais
+   afficher des chiffres différents entre le tableau de bord et le PDF).
+
+   Query params (ajoutés le 2026-08-07, décision utilisateur) :
+   - includeBeneficiaries=true : inclut la liste des bénéficiaires dans le
+     rapport complet (décochée par défaut côté frontend — absente sinon).
+   - onlyBeneficiaries=true : ignore includeBeneficiaries et génère un PDF
+     allégé contenant UNIQUEMENT le titre du programme + la liste des
+     bénéficiaires (aucune autre section) — bouton de téléchargement dédié
+     côté frontend, pas juste une variante de case à cocher. */
 const MAX_APPLICATIONS_IN_REPORT = 300; // garde-fou : évite un PDF interminable sur un programme à très grand volume
 
 exports.downloadImpactReport = async (req, res, next) => {
@@ -361,48 +371,74 @@ exports.downloadImpactReport = async (req, res, next) => {
       return res.status(403).json({ message: "Vous ne suivez pas ce programme" });
     }
 
-    const snapshot = await computeProgramSnapshot(programId);
-    if (!snapshot) return res.status(404).json({ message: "Programme introuvable" });
+    const onlyBeneficiaries = req.query.onlyBeneficiaries === "true";
+    const includeBeneficiaries = onlyBeneficiaries || req.query.includeBeneficiaries === "true";
 
-    const Application = getVolunteerApplicationModel();
-    const applicationQuery = { programId, status: { $in: PARTNER_VISIBLE_STATUSES } };
-    const [applicationsTotal, applications] = await Promise.all([
-      Application.countDocuments(applicationQuery),
-      Application.find(applicationQuery)
-        .select("applicantFirstName applicantLastName applicantEmail applicantPhone status createdAt")
-        .sort({ createdAt: -1 })
-        .limit(MAX_APPLICATIONS_IN_REPORT),
-    ]);
+    // En mode "uniquement la liste", on évite le calcul complet des
+    // statistiques/volontaires validés (inutile, non affiché) — seul le
+    // titre du programme sert de contexte de page.
+    const snapshot = onlyBeneficiaries ? null : await computeProgramSnapshot(programId);
+    if (!onlyBeneficiaries && !snapshot) return res.status(404).json({ message: "Programme introuvable" });
 
-    const Comment = getVolunteerProgramPartnerCommentModel();
-    const comments = await Comment.find({ programId, partnerId: req.user.id }).sort({ createdAt: -1 });
+    const Program = getVolunteerProgramModel();
+    const programDoc = onlyBeneficiaries
+      ? await Program.findById(programId).select("title description location startDate endDate")
+      : snapshot.program;
+    if (!programDoc) return res.status(404).json({ message: "Programme introuvable" });
+
+    let applications = [];
+    let applicationsTotal = 0;
+    if (includeBeneficiaries) {
+      const Application = getVolunteerApplicationModel();
+      const applicationQuery = { programId, status: { $in: PARTNER_VISIBLE_STATUSES } };
+      [applicationsTotal, applications] = await Promise.all([
+        Application.countDocuments(applicationQuery),
+        Application.find(applicationQuery)
+          .select("applicantFirstName applicantLastName applicantEmail applicantPhone status createdAt")
+          .sort({ createdAt: -1 })
+          .limit(MAX_APPLICATIONS_IN_REPORT),
+      ]);
+    }
+
+    let comments = [];
+    if (!onlyBeneficiaries) {
+      const Comment = getVolunteerProgramPartnerCommentModel();
+      comments = await Comment.find({ programId, partnerId: req.user.id }).sort({ createdAt: -1 });
+    }
 
     const User = getUserModel();
     const partner = await User.findById(req.user.id).select("name partnerLogoUrl");
 
+    const SiteSettings = getSiteSettingsModel();
+    const settings = await SiteSettings.findOne();
+
     const pdfBytes = await buildPartnerImpactReportPdf({
       program: {
-        title: snapshot.program.title,
-        description: snapshot.program.description,
-        location: snapshot.program.location,
-        startDate: snapshot.program.startDate,
-        endDate: snapshot.program.endDate,
+        title: programDoc.title,
+        description: programDoc.description,
+        location: programDoc.location,
+        startDate: programDoc.startDate,
+        endDate: programDoc.endDate,
       },
       partner: { name: partner?.name, partnerLogoUrl: partner?.partnerLogoUrl },
-      stats: snapshot.stats,
-      validatedVolunteers: snapshot.validatedVolunteers,
-      progressOverTime: snapshot.progressOverTime,
+      ampLogoUrl: settings?.ampLogoUrl || null,
+      partnersBarImageUrl: settings?.partnersBarImageUrl || null,
+      stats: snapshot?.stats,
+      validatedVolunteers: snapshot?.validatedVolunteers,
+      progressOverTime: snapshot?.progressOverTime,
       applications,
       applicationsTotal,
       comments: comments.map((c) => ({ text: c.text, createdAt: c.createdAt, reply: c.reply, repliedAt: c.repliedAt })),
+      options: { includeBeneficiaries, onlyBeneficiaries },
     });
 
-    const slug = snapshot.program.title.toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "").replace(/[^a-z0-9]+/g, "-").replace(/(^-|-$)/g, "");
+    const slug = programDoc.title.toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "").replace(/[^a-z0-9]+/g, "-").replace(/(^-|-$)/g, "");
+    const filenamePrefix = onlyBeneficiaries ? "liste-beneficiaires" : "rapport-impact";
 
     await logPartnerActivity({ partnerId: req.user.id, programId, action: "DOWNLOAD_REPORT" });
 
     res.setHeader("Content-Type", "application/pdf");
-    res.setHeader("Content-Disposition", `attachment; filename="rapport-impact-${slug || "programme"}.pdf"`);
+    res.setHeader("Content-Disposition", `attachment; filename="${filenamePrefix}-${slug || "programme"}.pdf"`);
     res.send(Buffer.from(pdfBytes));
   } catch (error) {
     next(error);
