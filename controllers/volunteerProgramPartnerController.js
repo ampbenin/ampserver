@@ -9,7 +9,7 @@
 
 const mongoose = require("mongoose");
 const streamifier = require("streamifier");
-const { PDFDocument, StandardFonts, rgb } = require("pdf-lib");
+const { buildPartnerImpactReportPdf } = require("../utils/partnerReportPdf");
 const getVolunteerProgramModel = require("../models/volunteerProgram");
 const getVolunteerTaskSubmissionModel = require("../models/volunteerTaskSubmission");
 const getVolunteerApplicationModel = require("../models/volunteerApplication");
@@ -57,6 +57,84 @@ exports.listMyPartnerPrograms = async (req, res, next) => {
   }
 };
 
+/* -------------------- Interne : calcule stats/volontaires validés/progression -------------------- */
+/* Extrait de getPartnerProgramStats pour être réutilisé tel quel par
+   downloadImpactReport — le PDF doit refléter EXACTEMENT les mêmes chiffres
+   que le tableau de bord, pas un calcul parallèle qui pourrait diverger. */
+async function computeProgramSnapshot(programId) {
+  await resolveScheduledTasks();
+  const Program = getVolunteerProgramModel();
+  const program = await Program.findById(programId)
+    .select("title description location startDate endDate tasks missionValidationThreshold applicationForm");
+  if (!program) return null;
+  const publishedTasks = getPublishedTasks(program);
+
+  const volunteers = await Volunteer.find({ "programs.programId": programId }).select("nom prenom programs");
+  const Submission = getVolunteerTaskSubmissionModel();
+  const allSubmissions = await Submission.find({ programId }).lean();
+
+  // Progression dans le temps (graphique du dashboard partenaire) : nombre
+  // de tâches approuvées par mois, groupé sur reviewedAt (date de validation
+  // par le staff/superviseur) — reflète le rythme réel d'activité plutôt que
+  // la date d'échéance de la tâche.
+  const progressOverTimeRaw = await Submission.aggregate([
+    { $match: { programId: new mongoose.Types.ObjectId(programId), status: "APPROVED", reviewedAt: { $ne: null } } },
+    { $group: { _id: { $dateToString: { format: "%Y-%m", date: "$reviewedAt" } }, count: { $sum: 1 } } },
+    { $sort: { _id: 1 } },
+  ]);
+  const progressOverTime = progressOverTimeRaw.map((r) => ({ label: r._id, count: r.count }));
+
+  const submissionsByVolunteer = new Map();
+  allSubmissions.forEach((s) => {
+    const key = String(s.volunteerId);
+    if (!submissionsByVolunteer.has(key)) submissionsByVolunteer.set(key, []);
+    submissionsByVolunteer.get(key).push(s);
+  });
+  const taskById = new Map((program.tasks || []).map((t) => [t.id, t]));
+
+  let percentSum = 0;
+  let totalApproved = 0;
+  let validatedCount = 0;
+  const validatedVolunteers = [];
+
+  for (const v of volunteers) {
+    const programEntry = v.programs.find((p) => p.programId.toString() === programId);
+    const submissions = submissionsByVolunteer.get(String(v._id)) || [];
+    const progress = computeProgress(publishedTasks, programEntry.assignedAt, program.endDate, submissions);
+    percentSum += progress.percent;
+    totalApproved += submissions.filter((s) => s.status === "APPROVED").length;
+
+    if (programEntry.statut === "Mission validée") {
+      validatedCount += 1;
+      const approvedTasks = submissions
+        .filter((s) => s.status === "APPROVED")
+        .map((s) => {
+          const task = taskById.get(s.taskId);
+          return {
+            taskTitle: task?.title || "Tâche",
+            occurrenceDate: s.occurrenceDate,
+            responses: s.responses,
+            proofFields: task ? getEffectiveProofFields(task) : [],
+          };
+        });
+      validatedVolunteers.push({ volunteerId: v._id, nom: v.nom, prenom: v.prenom, approvedTasks });
+    }
+  }
+
+  return {
+    program,
+    stats: {
+      totalVolunteers: volunteers.length,
+      validatedVolunteers: validatedCount,
+      percentValidated: volunteers.length > 0 ? Math.round((validatedCount / volunteers.length) * 100) : 0,
+      averageProgress: volunteers.length > 0 ? Math.round(percentSum / volunteers.length) : 0,
+      totalApprovedTasks: totalApproved,
+    },
+    validatedVolunteers,
+    progressOverTime,
+  };
+}
+
 /* -------------------- Protégé (PARTENAIRE) : statistiques/impact/résultats d'un programme -------------------- */
 exports.getPartnerProgramStats = async (req, res, next) => {
   try {
@@ -65,82 +143,20 @@ exports.getPartnerProgramStats = async (req, res, next) => {
       return res.status(403).json({ message: "Vous ne suivez pas ce programme" });
     }
 
-    await resolveScheduledTasks();
-    const Program = getVolunteerProgramModel();
-    const program = await Program.findById(programId)
-      .select("title description location startDate endDate tasks missionValidationThreshold applicationForm");
-    if (!program) return res.status(404).json({ message: "Programme introuvable" });
-    const publishedTasks = getPublishedTasks(program);
-
-    const volunteers = await Volunteer.find({ "programs.programId": programId }).select("nom prenom programs");
-    const Submission = getVolunteerTaskSubmissionModel();
-    const allSubmissions = await Submission.find({ programId }).lean();
-
-    // Progression dans le temps (graphique du dashboard partenaire) : nombre
-    // de tâches approuvées par mois, groupé sur reviewedAt (date de validation
-    // par le staff/superviseur) — reflète le rythme réel d'activité plutôt que
-    // la date d'échéance de la tâche.
-    const progressOverTimeRaw = await Submission.aggregate([
-      { $match: { programId: new mongoose.Types.ObjectId(programId), status: "APPROVED", reviewedAt: { $ne: null } } },
-      { $group: { _id: { $dateToString: { format: "%Y-%m", date: "$reviewedAt" } }, count: { $sum: 1 } } },
-      { $sort: { _id: 1 } },
-    ]);
-    const progressOverTime = progressOverTimeRaw.map((r) => ({ label: r._id, count: r.count }));
-
-    const submissionsByVolunteer = new Map();
-    allSubmissions.forEach((s) => {
-      const key = String(s.volunteerId);
-      if (!submissionsByVolunteer.has(key)) submissionsByVolunteer.set(key, []);
-      submissionsByVolunteer.get(key).push(s);
-    });
-    const taskById = new Map((program.tasks || []).map((t) => [t.id, t]));
-
-    let percentSum = 0;
-    let totalApproved = 0;
-    let validatedCount = 0;
-    const validatedVolunteers = [];
-
-    for (const v of volunteers) {
-      const programEntry = v.programs.find((p) => p.programId.toString() === programId);
-      const submissions = submissionsByVolunteer.get(String(v._id)) || [];
-      const progress = computeProgress(publishedTasks, programEntry.assignedAt, program.endDate, submissions);
-      percentSum += progress.percent;
-      totalApproved += submissions.filter((s) => s.status === "APPROVED").length;
-
-      if (programEntry.statut === "Mission validée") {
-        validatedCount += 1;
-        const approvedTasks = submissions
-          .filter((s) => s.status === "APPROVED")
-          .map((s) => {
-            const task = taskById.get(s.taskId);
-            return {
-              taskTitle: task?.title || "Tâche",
-              occurrenceDate: s.occurrenceDate,
-              responses: s.responses,
-              proofFields: task ? getEffectiveProofFields(task) : [],
-            };
-          });
-        validatedVolunteers.push({ volunteerId: v._id, nom: v.nom, prenom: v.prenom, approvedTasks });
-      }
-    }
+    const snapshot = await computeProgramSnapshot(programId);
+    if (!snapshot) return res.status(404).json({ message: "Programme introuvable" });
 
     await logPartnerActivity({ partnerId: req.user.id, programId, action: "VIEW_STATS" });
 
     res.json({
       program: {
-        title: program.title, description: program.description, location: program.location,
-        startDate: program.startDate, endDate: program.endDate,
-        applicationFormFields: program.applicationForm?.fields || [],
+        title: snapshot.program.title, description: snapshot.program.description, location: snapshot.program.location,
+        startDate: snapshot.program.startDate, endDate: snapshot.program.endDate,
+        applicationFormFields: snapshot.program.applicationForm?.fields || [],
       },
-      stats: {
-        totalVolunteers: volunteers.length,
-        validatedVolunteers: validatedCount,
-        percentValidated: volunteers.length > 0 ? Math.round((validatedCount / volunteers.length) * 100) : 0,
-        averageProgress: volunteers.length > 0 ? Math.round(percentSum / volunteers.length) : 0,
-        totalApprovedTasks: totalApproved,
-      },
-      validatedVolunteers,
-      progressOverTime,
+      stats: snapshot.stats,
+      validatedVolunteers: snapshot.validatedVolunteers,
+      progressOverTime: snapshot.progressOverTime,
     });
   } catch (error) {
     next(error);
@@ -325,6 +341,19 @@ exports.replyToComment = async (req, res, next) => {
 };
 
 /* -------------------- Protégé (PARTENAIRE) : rapport d'impact PDF, généré à la demande -------------------- */
+/* Reprend TOUT ce que le partenaire voit sur son tableau de bord (voir
+   src/components/gestionamp/dashboard/partenaire/PartnerDashboard.jsx) :
+   chiffres clés, progression dans le temps, candidatures reçues (jamais
+   les rejetées, même restriction que listPartnerApplications), volontaires
+   à mission validée + détail de leurs tâches approuvées, aperçu en images,
+   et ses échanges avec l'équipe. La construction du PDF lui-même (mise en
+   page, pagination, tableaux, mini bar chart) vit dans
+   utils/partnerReportPdf.js — ce contrôleur ne fait que rassembler les
+   données, à l'identique de getPartnerProgramStats (même
+   computeProgramSnapshot, pour ne jamais afficher des chiffres différents
+   entre le tableau de bord et le PDF). */
+const MAX_APPLICATIONS_IN_REPORT = 300; // garde-fou : évite un PDF interminable sur un programme à très grand volume
+
 exports.downloadImpactReport = async (req, res, next) => {
   try {
     const { programId } = req.params;
@@ -332,111 +361,43 @@ exports.downloadImpactReport = async (req, res, next) => {
       return res.status(403).json({ message: "Vous ne suivez pas ce programme" });
     }
 
-    const Program = getVolunteerProgramModel();
-    const program = await Program.findById(programId).select("title description location startDate endDate");
-    if (!program) return res.status(404).json({ message: "Programme introuvable" });
+    const snapshot = await computeProgramSnapshot(programId);
+    if (!snapshot) return res.status(404).json({ message: "Programme introuvable" });
 
-    const volunteers = await Volunteer.find({ "programs.programId": programId }).select("nom prenom programs");
-    const Submission = getVolunteerTaskSubmissionModel();
-    const allSubmissions = await Submission.find({ programId }).lean();
-    const approvedCountByVolunteer = new Map();
-    allSubmissions.forEach((s) => {
-      if (s.status !== "APPROVED") return;
-      const key = String(s.volunteerId);
-      approvedCountByVolunteer.set(key, (approvedCountByVolunteer.get(key) || 0) + 1);
-    });
+    const Application = getVolunteerApplicationModel();
+    const applicationQuery = { programId, status: { $in: PARTNER_VISIBLE_STATUSES } };
+    const [applicationsTotal, applications] = await Promise.all([
+      Application.countDocuments(applicationQuery),
+      Application.find(applicationQuery)
+        .select("applicantFirstName applicantLastName applicantEmail applicantPhone status createdAt")
+        .sort({ createdAt: -1 })
+        .limit(MAX_APPLICATIONS_IN_REPORT),
+    ]);
 
-    const validatedVolunteers = volunteers.filter((v) => {
-      const entry = v.programs.find((p) => p.programId.toString() === programId);
-      return entry?.statut === "Mission validée";
-    });
+    const Comment = getVolunteerProgramPartnerCommentModel();
+    const comments = await Comment.find({ programId, partnerId: req.user.id }).sort({ createdAt: -1 });
 
     const User = getUserModel();
     const partner = await User.findById(req.user.id).select("name partnerLogoUrl");
 
-    const pdfDoc = await PDFDocument.create();
-    const font = await pdfDoc.embedFont(StandardFonts.Helvetica);
-    const fontBold = await pdfDoc.embedFont(StandardFonts.HelveticaBold);
-    const page = pdfDoc.addPage([595.28, 841.89]); // A4 portrait, en points
-    const margin = 50;
-    let y = 841.89 - margin;
-    const primary = rgb(0x1b / 255, 0x43 / 255, 0x32 / 255); // vert de marque AMP BENIN
-    const gray = rgb(0.35, 0.35, 0.35);
-
-    // Logo du partenaire, si défini — n'empêche jamais la génération du PDF
-    // en cas d'échec (réseau, format non supporté par pdf-lib, etc.).
-    if (partner?.partnerLogoUrl) {
-      try {
-        const imgResponse = await fetch(partner.partnerLogoUrl);
-        const imgBytes = new Uint8Array(await imgResponse.arrayBuffer());
-        const contentType = imgResponse.headers.get("content-type") || "";
-        const image = contentType.includes("png")
-          ? await pdfDoc.embedPng(imgBytes)
-          : await pdfDoc.embedJpg(imgBytes);
-        const logoHeight = 40;
-        const logoWidth = (image.width / image.height) * logoHeight;
-        page.drawImage(image, { x: 595.28 - margin - logoWidth, y: y - logoHeight + 10, width: logoWidth, height: logoHeight });
-      } catch (logoError) {
-        console.error("⚠️ Logo partenaire non intégré au PDF :", logoError.message);
-      }
-    }
-
-    page.drawText("AMP BENIN — Rapport d'impact", { x: margin, y, size: 12, font, color: gray });
-    y -= 30;
-    page.drawText(toWinAnsiSafe(program.title), { x: margin, y, size: 20, font: fontBold, color: primary });
-    y -= 22;
-    if (program.description) {
-      page.drawText(toWinAnsiSafe(truncateForPdf(program.description, 100)), { x: margin, y, size: 10, font, color: gray });
-      y -= 16;
-    }
-    const infoLine = [
-      program.location ? `Lieu : ${program.location}` : null,
-      program.startDate ? `Début : ${new Date(program.startDate).toLocaleDateString("fr-FR")}` : null,
-      program.endDate ? `Fin : ${new Date(program.endDate).toLocaleDateString("fr-FR")}` : null,
-    ].filter(Boolean).join("   ·   ");
-    if (infoLine) {
-      page.drawText(toWinAnsiSafe(infoLine), { x: margin, y, size: 10, font, color: gray });
-      y -= 30;
-    } else {
-      y -= 14;
-    }
-
-    page.drawText("Chiffres clés", { x: margin, y, size: 13, font: fontBold, color: primary });
-    y -= 20;
-    const percentValidated = volunteers.length > 0 ? Math.round((validatedVolunteers.length / volunteers.length) * 100) : 0;
-    const totalApproved = [...approvedCountByVolunteer.values()].reduce((sum, n) => sum + n, 0);
-    const statLines = [
-      `Volontaires acceptés : ${volunteers.length}`,
-      `Mission validée : ${validatedVolunteers.length} (${percentValidated} %)`,
-      `Tâches approuvées au total : ${totalApproved}`,
-    ];
-    statLines.forEach((line) => {
-      page.drawText(`•  ${line}`, { x: margin + 10, y, size: 11, font });
-      y -= 16;
+    const pdfBytes = await buildPartnerImpactReportPdf({
+      program: {
+        title: snapshot.program.title,
+        description: snapshot.program.description,
+        location: snapshot.program.location,
+        startDate: snapshot.program.startDate,
+        endDate: snapshot.program.endDate,
+      },
+      partner: { name: partner?.name, partnerLogoUrl: partner?.partnerLogoUrl },
+      stats: snapshot.stats,
+      validatedVolunteers: snapshot.validatedVolunteers,
+      progressOverTime: snapshot.progressOverTime,
+      applications,
+      applicationsTotal,
+      comments: comments.map((c) => ({ text: c.text, createdAt: c.createdAt, reply: c.reply, repliedAt: c.repliedAt })),
     });
-    y -= 14;
 
-    page.drawText(`Volontaires à mission validée (${validatedVolunteers.length})`, { x: margin, y, size: 13, font: fontBold, color: primary });
-    y -= 20;
-    if (validatedVolunteers.length === 0) {
-      page.drawText("Aucun volontaire n'a encore validé sa mission sur ce programme.", { x: margin + 10, y, size: 10, font, color: gray });
-      y -= 16;
-    } else {
-      validatedVolunteers.forEach((v) => {
-        if (y < margin + 30) return; // évite de déborder d'une simple page A4 (v1)
-        const count = approvedCountByVolunteer.get(String(v._id)) || 0;
-        page.drawText(toWinAnsiSafe(`•  ${v.prenom} ${v.nom} — ${count} tâche(s) approuvée(s)`), { x: margin + 10, y, size: 10, font });
-        y -= 15;
-      });
-    }
-
-    page.drawText(
-      `Généré depuis le tableau de bord partenaire AMP BENIN le ${new Date().toLocaleDateString("fr-FR")}`,
-      { x: margin, y: margin - 15, size: 8, font, color: gray }
-    );
-
-    const pdfBytes = await pdfDoc.save();
-    const slug = program.title.toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "").replace(/[^a-z0-9]+/g, "-").replace(/(^-|-$)/g, "");
+    const slug = snapshot.program.title.toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "").replace(/[^a-z0-9]+/g, "-").replace(/(^-|-$)/g, "");
 
     await logPartnerActivity({ partnerId: req.user.id, programId, action: "DOWNLOAD_REPORT" });
 
@@ -447,20 +408,6 @@ exports.downloadImpactReport = async (req, res, next) => {
     next(error);
   }
 };
-
-function truncateForPdf(text, maxLength) {
-  if (text.length <= maxLength) return text;
-  return `${text.slice(0, maxLength - 1)}…`;
-}
-
-// StandardFonts (WinAnsi/Windows-1252) ne couvre que le Latin-1 étendu —
-// un emoji ou tout caractère hors de cette plage fait planter drawText()
-// (constaté en pratique avec 📍 pendant les tests). Filtre défensif pour
-// tout texte pouvant venir de la base (titre de programme, nom de
-// volontaire...) plutôt que de ne sécuriser que les chaînes en dur.
-function toWinAnsiSafe(text) {
-  return [...String(text)].filter((ch) => ch.codePointAt(0) <= 0xff).join("");
-}
 
 /* ==================== Staff (ADMIN/EDITOR) : suivi d'activité des partenaires ==================== */
 /* Pour savoir qui s'intéresse au programme et ce qu'il aime vérifier — voir
