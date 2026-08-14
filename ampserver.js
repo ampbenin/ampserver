@@ -78,6 +78,11 @@ app.use("/api/volunteer-discipline", require("./routes/volunteerDisciplineRoute"
 // Réglages du site (logo AMP BENIN, bannière "Barre des partenaires") —
 // lecture publique, écriture ADMIN uniquement (voir models/siteSettings.js).
 app.use("/api/site-settings", require("./routes/siteSettingsRoute"));
+
+// Réinitialisation d'urgence des comptes volontaires (mesure temporaire,
+// voir models/emergencyResetBatch.js) — création/gestion des lots réservée
+// ADMIN, le lien d'urgence lui-même est public (partagé hors système).
+app.use("/api/emergency-reset", require("./routes/emergencyResetRoute"));
 app.use("/api/newsletter", newsletterRoutes);
 app.use("/api/contact", contactRoutes);
 app.use("/api/partner-form", partnerRoutes);

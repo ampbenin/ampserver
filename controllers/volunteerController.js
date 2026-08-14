@@ -45,7 +45,7 @@ const attachProgramTitles = async (volunteers) => {
 /* ---------------------- Créer ou mettre à jour un volontaire ---------------------- */
 const createOrUpdateVolunteer = async (req, res, next) => {
   try {
-    const { nom, prenom, email, telephone, statut, programs = [] } = req.body;
+    const { nom, prenom, email, telephone, statut, dateNaissance, programs = [] } = req.body;
     const Program = getVolunteerProgramModel();
 
     if (!email) return res.status(400).json({ message: "Email requis" });
@@ -70,6 +70,7 @@ const createOrUpdateVolunteer = async (req, res, next) => {
         email,
         telephone,
         statut,
+        dateNaissance: dateNaissance || null,
         programs: programEntries,
       });
 
@@ -85,6 +86,7 @@ const createOrUpdateVolunteer = async (req, res, next) => {
     volunteer.prenom = prenom ?? volunteer.prenom;
     volunteer.telephone = telephone ?? volunteer.telephone;
     volunteer.statut = statut ?? volunteer.statut;
+    if (dateNaissance !== undefined) volunteer.dateNaissance = dateNaissance || null;
 
     for (const p of programEntries) {
       const existing = volunteer.programs.find(

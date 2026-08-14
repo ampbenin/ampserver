@@ -15,6 +15,13 @@ const VolunteerSchema = new mongoose.Schema(
     email: { type: String, required: true, trim: true, lowercase: true },
     telephone: { type: String },
 
+    // Ajouté 2026-08-14 pour la mesure de réinitialisation d'urgence
+    // (voir models/emergencyResetBatch.js) — sert de question de contrôle
+    // possible ("Âge") au même titre que nom/prénom/téléphone. Optionnel,
+    // vide pour la quasi-totalité des fiches existantes tant que le staff
+    // ne le renseigne pas manuellement (VolunteersManager.jsx/SaveVolunteers.jsx).
+    dateNaissance: { type: Date, default: null },
+
     // ✅ Compte "Mon espace" — ce document EST le compte, pas une collection
     // séparée (contrairement à NumsalUser) : un profil Volunteer existe déjà
     // souvent avant tout compte (créé par le staff ou à l'acceptation d'une
