@@ -8,8 +8,10 @@ const { authLimiter } = require("../../config/rateLimit");
 // 🔓 Inscription apprenant (libre-service)
 router.post("/register", authLimiter, authController.register);
 
-// 🔐 Connexion
-router.post("/login", authLimiter, authController.login);
+// 🔐 Connexion — plus de authLimiter (IP) ici : remplacé par une limite
+// PAR COMPTE gérée directement dans authController.login (voir
+// utils/loginAttemptLimiter.js), avec exemption ADMIN.
+router.post("/login", authController.login);
 
 // 🔐 Changement de mot de passe (protégé — accessible même si mustChangePassword=true)
 router.post("/change-password", authMiddleware, authController.changePassword);

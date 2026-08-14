@@ -7,7 +7,9 @@ const { authLimiter } = require("../config/rateLimit");
 
 // 🌐 Public — comptes "Mon espace" (voir le plan de ce chantier)
 router.post("/register", authLimiter, ctrl.register);
-router.post("/login", authLimiter, ctrl.login);
+// Plus de authLimiter (IP) ici : remplacé par une limite PAR COMPTE gérée
+// directement dans le contrôleur (voir utils/loginAttemptLimiter.js).
+router.post("/login", ctrl.login);
 router.post("/request-password-link", authLimiter, ctrl.requestPasswordLink);
 router.post("/set-password", authLimiter, ctrl.setPassword);
 

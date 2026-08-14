@@ -5,8 +5,10 @@ const authController = require("../../controllers/gestionamp/authController");
 const authMiddleware = require("../../middlewares/gestionamp/authMiddleware");
 const { authLimiter } = require("../../config/rateLimit");
 
-// 🔐 Connexion
-router.post("/login", authLimiter, authController.login);
+// 🔐 Connexion — plus de authLimiter (IP) ici : remplacé par une limite
+// PAR COMPTE gérée directement dans authController.login (voir
+// utils/loginAttemptLimiter.js), avec exemption ADMIN/PARTENAIRE.
+router.post("/login", authController.login);
 
 // 🔐 Profil courant (utilisé par useAuthAMP.js — endpoint manquant jusqu'ici,
 // ce qui faisait échouer systématiquement la garde d'accès des dashboards)

@@ -16,6 +16,7 @@ const jwtConfig = require("../config/jwt");
 const resend = require("../utils/resendMailer");
 const { renderBrandedEmail, escapeHtml } = require("../utils/emailTemplates");
 const { attachProgramTitles } = require("./volunteerController");
+const loginAttemptLimiter = require("../utils/loginAttemptLimiter");
 
 // Adresse alignée sur le domaine vérifié Resend (candidatures@ampbenin.org,
 // voir .env RESEND_FROM_EMAIL) — PAS onboarding@resend.dev (domaine
@@ -123,12 +124,21 @@ exports.login = async (req, res, next) => {
       return res.status(400).json({ message: "Email et mot de passe requis" });
     }
 
+    // Limite de tentatives PAR COMPTE, pas par IP (voir
+    // utils/loginAttemptLimiter.js) — remplace l'ancien authLimiter (IP)
+    // sur cette route, qui bloquait à tort tout un réseau partagé pour la
+    // faute d'un seul compte.
+    if (loginAttemptLimiter.isLocked("volunteer", email)) {
+      return res.status(429).json({ message: "Trop de tentatives pour ce compte. Réessayez dans quelques minutes." });
+    }
+
     // Cherché par email SEUL (pas isActive:true dans la requête) : une
     // suspension arrivée à échéance doit se lever automatiquement ici,
     // avant de décider si le compte est bloqué ou non (voir plus bas) —
     // impossible à faire avec un simple filtre Mongo statique.
     const volunteer = await Volunteer.findOne({ email: email.toLowerCase().trim() });
     if (!volunteer) {
+      loginAttemptLimiter.recordFailedAttempt("volunteer", email);
       return res.status(401).json({ message: "Identifiants invalides" });
     }
 
@@ -162,8 +172,11 @@ exports.login = async (req, res, next) => {
 
     const isMatch = await volunteer.comparePassword(password);
     if (!isMatch) {
+      loginAttemptLimiter.recordFailedAttempt("volunteer", email);
       return res.status(401).json({ message: "Identifiants invalides" });
     }
+
+    loginAttemptLimiter.resetAttempts("volunteer", email);
 
     const token = generateToken(volunteer);
     res.json({

@@ -13,6 +13,7 @@ const getInstitutionSpecialiseeModel = require("../../models/gestionamp/Institut
 const jwtConfig = require("../../config/jwt");
 const resend = require("../../utils/resendMailer");
 const { logPartnerActivity } = require("../../utils/partnerActivityLogger");
+const loginAttemptLimiter = require("../../utils/loginAttemptLimiter");
 
 /**
  * Génération du token JWT.
@@ -46,14 +47,31 @@ exports.login = async (req, res) => {
     }
 
     const user = await User.findOne({ email, isActive: true });
+
+    // Les comptes ADMIN et PARTENAIRE ne sont jamais soumis à la limite de
+    // tentatives (décision utilisateur, 2026-08-14) — les autres rôles
+    // (EDITOR, SUPERVISEUR, EC, IS) ainsi que les emails inexistants/
+    // inactifs restent protégés contre le brute-force, mais UNIQUEMENT sur
+    // le compte visé (voir utils/loginAttemptLimiter.js) — plus par IP, ce
+    // qui bloquait à tort tout un réseau partagé pour la faute d'un seul.
+    const isExempt = !!user && (user.role === "ADMIN" || user.role === "PARTENAIRE");
+
+    if (!isExempt && loginAttemptLimiter.isLocked("gestionamp", email)) {
+      return res.status(429).json({ message: "Trop de tentatives pour ce compte. Réessayez dans quelques minutes." });
+    }
+
     if (!user) {
+      if (!isExempt) loginAttemptLimiter.recordFailedAttempt("gestionamp", email);
       return res.status(401).json({ message: "Identifiants invalides" });
     }
 
     const isMatch = await user.comparePassword(password);
     if (!isMatch) {
+      if (!isExempt) loginAttemptLimiter.recordFailedAttempt("gestionamp", email);
       return res.status(401).json({ message: "Identifiants invalides" });
     }
+
+    if (!isExempt) loginAttemptLimiter.resetAttempts("gestionamp", email);
 
     const token = generateToken(user);
 

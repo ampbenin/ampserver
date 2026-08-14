@@ -16,6 +16,7 @@ const Sentry = require("@sentry/node");
 const getNumsalUserModel = require("../../models/numsal/NumsalUser");
 const jwtConfig = require("../../config/jwt");
 const resend = require("../../utils/resendMailer");
+const loginAttemptLimiter = require("../../utils/loginAttemptLimiter");
 
 const generateToken = (user) => {
   return jwt.sign(
@@ -90,14 +91,28 @@ exports.login = async (req, res) => {
     }
 
     const user = await NumsalUser.findOne({ email, isActive: true });
+
+    // Même principe que gestionamp/authController.js : limite PAR COMPTE
+    // (pas par IP, voir utils/loginAttemptLimiter.js), et les comptes
+    // ADMIN n'y sont jamais soumis.
+    const isExempt = !!user && user.role === "ADMIN";
+
+    if (!isExempt && loginAttemptLimiter.isLocked("numsal", email)) {
+      return res.status(429).json({ message: "Trop de tentatives pour ce compte. Réessayez dans quelques minutes." });
+    }
+
     if (!user) {
+      if (!isExempt) loginAttemptLimiter.recordFailedAttempt("numsal", email);
       return res.status(401).json({ message: "Identifiants invalides" });
     }
 
     const isMatch = await user.comparePassword(password);
     if (!isMatch) {
+      if (!isExempt) loginAttemptLimiter.recordFailedAttempt("numsal", email);
       return res.status(401).json({ message: "Identifiants invalides" });
     }
+
+    if (!isExempt) loginAttemptLimiter.resetAttempts("numsal", email);
 
     const token = generateToken(user);
 
