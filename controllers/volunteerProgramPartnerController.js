@@ -118,7 +118,10 @@ async function computeProgramSnapshot(programId) {
             proofFields: task ? getEffectiveProofFields(task) : [],
           };
         });
-      validatedVolunteers.push({ volunteerId: v._id, nom: v.nom, prenom: v.prenom, approvedTasks });
+      // `progress` ajouté pour permettre au partenaire de classer ses
+      // volontaires validés par progression (décision utilisateur,
+      // 2026-08-17) — jusqu'ici seul `approvedTasks` était renvoyé.
+      validatedVolunteers.push({ volunteerId: v._id, nom: v.nom, prenom: v.prenom, progress, approvedTasks });
     }
   }
 
