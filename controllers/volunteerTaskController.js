@@ -9,6 +9,8 @@ const streamifier = require("streamifier");
 const cloudinary = require("../utils/cloudinary");
 const getVolunteerProgramModel = require("../models/volunteerProgram");
 const getVolunteerTaskSubmissionModel = require("../models/volunteerTaskSubmission");
+const getVolunteerApplicationModel = require("../models/volunteerApplication");
+const getVolunteerApplicationGroupModel = require("../models/volunteerApplicationGroup");
 const getUserModel = require("../models/gestionamp/User");
 const Volunteer = require("../models/volunteer");
 const { canReviewProgram } = require("./volunteerProgramController");
@@ -341,7 +343,12 @@ exports.listProgramProgress = async (req, res, next) => {
       volunteerQuery._id = { $in: assignment.volunteerIds };
     }
 
-    const volunteers = await Volunteer.find(volunteerQuery).select("nom prenom email programs");
+    // telephone ajouté (en plus de nom/prenom/email) — un SUPERVISEUR a
+    // besoin des coordonnées complètes des volontaires qui lui sont
+    // affectés, pas seulement de leur email (décision utilisateur,
+    // 2026-08-17 : "il faut que le superviseur ait les informations
+    // nécessaires des volontaires qui sont sur lui").
+    const volunteers = await Volunteer.find(volunteerQuery).select("nom prenom email telephone programs");
 
     const Submission = getVolunteerTaskSubmissionModel();
     const allSubmissions = await Submission.find({ programId }).lean();
@@ -352,15 +359,40 @@ exports.listProgramProgress = async (req, res, next) => {
       submissionsByVolunteer.get(key).push(s);
     });
 
+    // Nom du/des groupe(s) d'un volontaire — VolunteerApplicationGroup
+    // référence des candidatures (applicationIds), jamais des volontaires
+    // directement, donc il faut d'abord retrouver la candidature de CE
+    // volontaire sur CE programme (VolunteerApplication.volunteerId, rempli
+    // à l'acceptation) avant de résoudre les groupes qui la contiennent.
+    const Application = getVolunteerApplicationModel();
+    const applications = await Application.find({ programId, volunteerId: { $in: volunteers.map((v) => v._id) } })
+      .select("volunteerId");
+    const applicationIdByVolunteerId = new Map(applications.map((a) => [String(a.volunteerId), String(a._id)]));
+
+    const Group = getVolunteerApplicationGroupModel();
+    const groups = await Group.find({ programId }).select("name applicationIds");
+    const groupNamesByApplicationId = new Map();
+    groups.forEach((g) => {
+      g.applicationIds.forEach((appId) => {
+        const key = String(appId);
+        if (!groupNamesByApplicationId.has(key)) groupNamesByApplicationId.set(key, []);
+        groupNamesByApplicationId.get(key).push(g.name);
+      });
+    });
+
     const items = volunteers.map((v) => {
       const programEntry = v.programs.find((p) => p.programId.toString() === programId);
       const submissions = submissionsByVolunteer.get(String(v._id)) || [];
       const progress = computeProgress(publishedTasks, programEntry.assignedAt, program.endDate, submissions);
+      const applicationId = applicationIdByVolunteerId.get(String(v._id));
+      const groupNames = applicationId ? (groupNamesByApplicationId.get(applicationId) || []) : [];
       return {
         volunteerId: v._id,
         nom: v.nom,
         prenom: v.prenom,
         email: v.email,
+        telephone: v.telephone || "",
+        groupNames,
         statut: programEntry.statut,
         progress,
       };
