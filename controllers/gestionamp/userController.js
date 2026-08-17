@@ -165,6 +165,130 @@ exports.toggleUserStatus = async (req, res) => {
 };
 
 /**
+ * @route PATCH /gestionamp/api/users/:id
+ * @desc Modifier les informations d'un compte (nom, email, rôle, espace
+ *       associé, mot de passe optionnel). Bouton "Modifier" de
+ *       UsersTable.jsx — n'existait pas jusqu'ici (bug signalé : "pas de
+ *       possibilité de modifier les informations du compte").
+ */
+exports.updateUser = async (req, res) => {
+  try {
+    const User = getUserModel();
+    const user = await User.findById(req.params.id);
+    if (!user) {
+      return res.status(404).json({ message: "Utilisateur introuvable" });
+    }
+
+    const { name, email, role, coordinationCommunaleId, institutionSpecialiseeId, password } = req.body;
+
+    // Même garde-fou que createUser (renommage par email) : jamais de
+    // rétrogradation silencieuse d'un compte ADMIN. Cette route est
+    // ADMIN-only (voir userRoutes.js) — un ADMIN qui modifierait SON
+    // PROPRE rôle est donc de toute façon toujours couvert par ce même
+    // garde-fou (son propre compte a lui aussi role === "ADMIN"), pas
+    // besoin d'une vérification "self" séparée.
+    if (role && role !== user.role) {
+      if (user.role === "ADMIN") {
+        return res.status(409).json({
+          message: "Ce compte est ADMIN — changez son rôle manuellement dans la base si c'est vraiment voulu.",
+        });
+      }
+      if (!["ADMIN", "EDITOR", "EC", "IS", "SUPERVISEUR", "PARTENAIRE"].includes(role)) {
+        return res.status(400).json({ message: "Rôle invalide" });
+      }
+    }
+
+    const nextRole = role || user.role;
+    if (nextRole === "EC" && !(coordinationCommunaleId || user.coordinationCommunaleId)) {
+      return res.status(400).json({ message: "coordinationCommunaleId requis pour un EC" });
+    }
+    if (nextRole === "IS" && !(institutionSpecialiseeId || user.institutionSpecialiseeId)) {
+      return res.status(400).json({ message: "institutionSpecialiseeId requis pour un IS" });
+    }
+
+    if (email && email.toLowerCase().trim() !== user.email) {
+      const emailTaken = await User.findOne({ email: email.toLowerCase().trim(), _id: { $ne: user._id } });
+      if (emailTaken) {
+        return res.status(409).json({ message: "Cet email est déjà utilisé par un autre compte" });
+      }
+      user.email = email.toLowerCase().trim();
+    }
+
+    if (name) user.name = name;
+    if (role) {
+      user.role = role;
+      user.coordinationCommunaleId = role === "EC" ? (coordinationCommunaleId || user.coordinationCommunaleId) : null;
+      user.institutionSpecialiseeId = role === "IS" ? (institutionSpecialiseeId || user.institutionSpecialiseeId) : null;
+    } else {
+      if (user.role === "EC" && coordinationCommunaleId) user.coordinationCommunaleId = coordinationCommunaleId;
+      if (user.role === "IS" && institutionSpecialiseeId) user.institutionSpecialiseeId = institutionSpecialiseeId;
+    }
+    if (password) {
+      if (password.length < 8) {
+        return res.status(400).json({ message: "Le mot de passe doit contenir au moins 8 caractères" });
+      }
+      user.password = password; // haché par le hook pre("save")
+    }
+
+    await user.save();
+
+    getCoordinationCommunaleModel();
+    getInstitutionSpecialiseeModel();
+    const updated = await User.findById(user._id)
+      .populate("coordinationCommunaleId", "name commune")
+      .populate("institutionSpecialiseeId", "name domaine")
+      .select("-password");
+
+    res.json({ message: "Compte mis à jour avec succès", user: updated });
+  } catch (error) {
+    res.status(500).json({
+      message: "Erreur serveur",
+      error: error.message,
+    });
+  }
+};
+
+/**
+ * @route DELETE /gestionamp/api/users/:id
+ * @desc Supprimer définitivement un compte. Bouton "Supprimer" de
+ *       UsersTable.jsx appelait jusqu'ici une route inexistante
+ *       (/api/admin/users/:id, jamais montée côté serveur — bug signalé,
+ *       le bouton ne faisait donc littéralement rien).
+ */
+exports.deleteUser = async (req, res) => {
+  try {
+    const User = getUserModel();
+    const user = await User.findById(req.params.id);
+    if (!user) {
+      return res.status(404).json({ message: "Utilisateur introuvable" });
+    }
+
+    // Même garde-fou que toggleUserStatus : jamais se supprimer soi-même.
+    if (user._id.toString() === req.user.id) {
+      return res.status(400).json({ message: "Impossible de supprimer son propre compte" });
+    }
+
+    // Ne jamais permettre de supprimer le dernier compte ADMIN restant —
+    // personne ne pourrait plus gérer les comptes ensuite.
+    if (user.role === "ADMIN") {
+      const otherAdmins = await User.countDocuments({ role: "ADMIN", _id: { $ne: user._id } });
+      if (otherAdmins === 0) {
+        return res.status(400).json({ message: "Impossible de supprimer le dernier compte ADMIN restant" });
+      }
+    }
+
+    await user.deleteOne();
+
+    res.json({ message: "Compte supprimé avec succès" });
+  } catch (error) {
+    res.status(500).json({
+      message: "Erreur serveur",
+      error: error.message,
+    });
+  }
+};
+
+/**
  * @route POST /gestionamp/api/users/:id/partner-logo
  * @desc ADMIN définit/corrige le logo d'un compte PARTENAIRE en particulier
  *       — en plus du self-service déjà existant côté partenaire

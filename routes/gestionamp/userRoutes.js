@@ -26,6 +26,12 @@ router.get("/", userController.getAllUsers);
 // 🔄 Activer / désactiver un utilisateur
 router.patch("/:id/status", userController.toggleUserStatus);
 
+// ✏️ Modifier les informations d'un compte (nom/email/rôle/espace/mot de passe)
+router.patch("/:id", userController.updateUser);
+
+// 🗑️ Supprimer définitivement un compte
+router.delete("/:id", userController.deleteUser);
+
 // 🖼️ Définir/corriger le logo d'un compte PARTENAIRE (en plus du
 // self-service déjà existant côté partenaire lui-même).
 router.post("/:id/partner-logo", upload.single("file"), userController.uploadPartnerLogoForUser);
