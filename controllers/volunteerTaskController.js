@@ -441,11 +441,19 @@ exports.listMySupervisedPrograms = async (req, res, next) => {
     const assignments = fullUser?.supervisedAssignments || [];
 
     const Program = getVolunteerProgramModel();
-    const programs = await Program.find({ _id: { $in: assignments.map((a) => a.programId) } }).select("title");
+    // description/location/startDate/endDate ajoutés pour que
+    // SupervisorDashboard.jsx puisse afficher des infos sur le programme
+    // (un superviseur n'a pas accès à GET /api/volunteer-programs/:id,
+    // réservé ADMIN/EDITOR — cette route reste donc la seule source pour lui).
+    const programs = await Program.find({ _id: { $in: assignments.map((a) => a.programId) } })
+      .select("title description location startDate endDate");
 
     const items = programs.map((p) => {
       const assignment = assignments.find((a) => a.programId.toString() === p._id.toString());
-      return { programId: p._id, title: p.title, volunteerCount: assignment?.volunteerIds?.length || 0 };
+      return {
+        programId: p._id, title: p.title, volunteerCount: assignment?.volunteerIds?.length || 0,
+        description: p.description, location: p.location, startDate: p.startDate, endDate: p.endDate,
+      };
     });
 
     res.json({ items });
