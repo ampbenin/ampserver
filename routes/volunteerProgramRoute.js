@@ -7,6 +7,10 @@ const authMiddleware = require("../middlewares/gestionamp/authMiddleware");
 const roleMiddleware = require("../middlewares/gestionamp/roleMiddleware");
 
 const requireStaff = [authMiddleware, roleMiddleware("ADMIN", "EDITOR")];
+// Affecter/retirer un EDITOR d'un programme (donne les pleins pouvoirs
+// "comme ADMIN" sur ce programme, voir controller) — réservé ADMIN, jamais
+// un EDITOR ne peut s'auto-affecter ni affecter un autre EDITOR.
+const requireAdminOnly = [authMiddleware, roleMiddleware("ADMIN")];
 
 const upload = multer({
   storage: multer.memoryStorage(),
@@ -27,6 +31,7 @@ router.put("/:id", ...requireStaff, ctrl.updateProgramMeta);
 router.delete("/:id", ...requireStaff, ctrl.deleteProgram);
 router.patch("/:id/supervisors", ...requireStaff, ctrl.setSupervisorAssignment);
 router.patch("/:id/partners", ...requireStaff, ctrl.setPartnerAccess);
+router.patch("/:id/editors", ...requireAdminOnly, ctrl.setEditorAccess);
 router.post("/:id/partners-bar", ...requireStaff, upload.single("file"), ctrl.uploadPartnersBarImage);
 
 module.exports = router;

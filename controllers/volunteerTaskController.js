@@ -329,7 +329,7 @@ exports.listProgramProgress = async (req, res, next) => {
     const { programId } = req.params;
     await resolveScheduledTasks();
     const Program = getVolunteerProgramModel();
-    const program = await Program.findById(programId).select("title tasks missionValidationThreshold endDate reviewerIds");
+    const program = await Program.findById(programId).select("title tasks missionValidationThreshold endDate reviewerIds editorIds");
     if (!program) return res.status(404).json({ message: "Programme introuvable" });
     const publishedTasks = getPublishedTasks(program);
 
@@ -419,7 +419,7 @@ exports.finalizeMissions = async (req, res, next) => {
     const { programId } = req.params;
     const Program = getVolunteerProgramModel();
     const program = await Program.findById(programId)
-      .select("tasks endDate missionValidationThreshold missionsFinalizedAt reviewerIds");
+      .select("tasks endDate missionValidationThreshold missionsFinalizedAt reviewerIds editorIds");
     if (!program) return res.status(404).json({ message: "Programme introuvable" });
     if (!canReviewProgram(program, req.user)) {
       return res.status(403).json({ message: "Vous n'êtes pas autorisé à gérer ce programme" });

@@ -61,9 +61,20 @@ const VolunteerProgramSchema = new mongoose.Schema(
     admissionInstructions: { type: String, default: "" },
 
     // Staff autorisé à examiner les candidatures de CE programme, en plus
-    // de tout ADMIN/EDITOR. Référence cross-connection vers GestionAmpUser
-    // (formDB), même limite que VolunteerForm.handledBy déjà existant.
+    // de ADMIN et des EDITOR affectés (editorIds ci-dessous). Référence
+    // cross-connection vers GestionAmpUser (formDB), même limite que
+    // VolunteerForm.handledBy déjà existant.
     reviewerIds: [{ type: mongoose.Schema.Types.ObjectId, ref: "GestionAmpUser", default: [] }],
+
+    // Comptes EDITOR affectés à CE programme — un EDITOR n'a plus, depuis le
+    // 2026-08-17, d'accès à tous les programmes par défaut (auparavant le
+    // rôle EDITOR seul suffisait, voir git blame) : il ne peut désormais
+    // gérer que les programmes listés ici, mais y a alors exactement les
+    // mêmes pouvoirs qu'un ADMIN (réglages, tâches, candidatures, groupes,
+    // suivi, finaliser les missions...). Sans effet pour un compte ADMIN,
+    // qui garde un accès total à tout programme. Voir canReviewProgram
+    // (controllers/volunteerProgramController.js).
+    editorIds: [{ type: mongoose.Schema.Types.ObjectId, ref: "GestionAmpUser", default: [] }],
     createdBy: { type: mongoose.Schema.Types.ObjectId, ref: "GestionAmpUser", default: null },
 
     // Pertinent uniquement quand accessMode === "APPLICATION".

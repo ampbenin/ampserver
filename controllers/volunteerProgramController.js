@@ -4,8 +4,9 @@
  * publication, un formulaire de candidature personnalisable, et se ferme
  * automatiquement à l'échéance. Même logique que NumSAL
  * (controllers/numsal/courseController.js), adaptée : pas de
- * "propriétaire" par programme (tout ADMIN/EDITOR peut gérer tout
- * programme, plus des reviewerIds optionnels), pas de leçons.
+ * "propriétaire" par programme (ADMIN gère tout, un EDITOR seulement les
+ * programmes qui lui sont affectés via editorIds, plus des reviewerIds
+ * optionnels pour d'autres rôles), pas de leçons.
  */
 
 const streamifier = require("streamifier");
@@ -61,8 +62,19 @@ const closeExpiredPrograms = async () => {
 };
 exports.closeExpiredPrograms = closeExpiredPrograms;
 
+// ADMIN gère tout programme sans condition. Un EDITOR ne gère que les
+// programmes où il figure dans editorIds — plus d'accès blanket depuis le
+// 2026-08-17 (décision utilisateur : "quand on lui affecte un programme, il
+// peut tout gérer sur ce programme comme il était admin", donc pas avant).
+// Les autres rôles (EC/IS/SUPERVISEUR...) passent par reviewerIds, un
+// mécanisme distinct et inchangé, plus restreint dans les faits car les
+// routes de réglages du programme (settings/suppression/affectations) leur
+// restent de toute façon fermées par le rôle au niveau de la route.
 const canReviewProgram = (program, user) => {
-  if (user.role === "ADMIN" || user.role === "EDITOR") return true;
+  if (user.role === "ADMIN") return true;
+  if (user.role === "EDITOR") {
+    return (program.editorIds || []).some((id) => id.toString() === user.id);
+  }
   return (program.reviewerIds || []).some((id) => id.toString() === user.id);
 };
 exports.canReviewProgram = canReviewProgram;
@@ -89,6 +101,9 @@ exports.getProgramById = async (req, res, next) => {
     const Program = getVolunteerProgramModel();
     const program = await Program.findById(req.params.id);
     if (!program) return res.status(404).json({ message: "Programme introuvable" });
+    if (!canReviewProgram(program, req.user)) {
+      return res.status(403).json({ message: "Vous n'êtes pas autorisé à gérer ce programme" });
+    }
 
     const programObj = program.toObject();
     programObj.applicationForm = {
@@ -103,11 +118,14 @@ exports.getProgramById = async (req, res, next) => {
 };
 
 /* -------------------- Staff (ADMIN/EDITOR) : liste complète (gestion) -------------------- */
+/* Un EDITOR ne voit que les programmes qui lui sont affectés (editorIds) —
+   ADMIN voit tout, sans condition. */
 exports.listAllPrograms = async (req, res, next) => {
   try {
     await closeExpiredPrograms();
     const Program = getVolunteerProgramModel();
-    const programs = await Program.find()
+    const query = req.user.role === "EDITOR" ? { editorIds: req.user.id } : {};
+    const programs = await Program.find(query)
       .select("title status location startDate endDate accessMode applicationDeadline capacity")
       .sort({ createdAt: -1 });
     res.json({ items: programs });
@@ -117,6 +135,9 @@ exports.listAllPrograms = async (req, res, next) => {
 };
 
 /* -------------------- Staff (ADMIN/EDITOR) : créer un programme -------------------- */
+/* Un EDITOR qui crée un programme y est automatiquement affecté (editorIds)
+   — sinon il se retrouverait aussitôt hors du programme qu'il vient de
+   créer, puisqu'il ne gère plus que ce qui lui est explicitement affecté. */
 exports.createProgram = async (req, res, next) => {
   try {
     const Program = getVolunteerProgramModel();
@@ -143,6 +164,7 @@ exports.createProgram = async (req, res, next) => {
       applicationDeadline: applicationDeadline || null,
       brandColor: brandColor || "",
       createdBy: req.user.id,
+      editorIds: req.user.role === "EDITOR" ? [req.user.id] : [],
     });
 
     res.status(201).json(program);
@@ -157,6 +179,9 @@ exports.updateProgramMeta = async (req, res, next) => {
     const Program = getVolunteerProgramModel();
     const program = await Program.findById(req.params.id);
     if (!program) return res.status(404).json({ message: "Programme introuvable" });
+    if (!canReviewProgram(program, req.user)) {
+      return res.status(403).json({ message: "Vous n'êtes pas autorisé à gérer ce programme" });
+    }
 
     const {
       title, description, coverImageUrl, status, location, startDate, endDate,
@@ -238,6 +263,9 @@ exports.deleteProgram = async (req, res, next) => {
 
     const program = await Program.findById(req.params.id);
     if (!program) return res.status(404).json({ message: "Programme introuvable" });
+    if (!canReviewProgram(program, req.user)) {
+      return res.status(403).json({ message: "Vous n'êtes pas autorisé à gérer ce programme" });
+    }
 
     const hasApplications = await Application.exists({ programId: program._id });
     if (hasApplications) {
@@ -268,6 +296,9 @@ exports.setSupervisorAssignment = async (req, res, next) => {
     const Program = getVolunteerProgramModel();
     const program = await Program.findById(req.params.id);
     if (!program) return res.status(404).json({ message: "Programme introuvable" });
+    if (!canReviewProgram(program, req.user)) {
+      return res.status(403).json({ message: "Vous n'êtes pas autorisé à gérer ce programme" });
+    }
 
     const User = getUserModel();
     const supervisor = await User.findById(supervisorId);
@@ -301,6 +332,9 @@ exports.setPartnerAccess = async (req, res, next) => {
     const Program = getVolunteerProgramModel();
     const program = await Program.findById(req.params.id);
     if (!program) return res.status(404).json({ message: "Programme introuvable" });
+    if (!canReviewProgram(program, req.user)) {
+      return res.status(403).json({ message: "Vous n'êtes pas autorisé à gérer ce programme" });
+    }
 
     const User = getUserModel();
     const partner = await User.findById(partnerId);
@@ -323,6 +357,43 @@ exports.setPartnerAccess = async (req, res, next) => {
   }
 };
 
+/* -------------------- ADMIN : affecter/retirer un EDITOR sur ce programme -------------------- */
+/* Un EDITOR affecté obtient exactement les mêmes pouvoirs qu'un ADMIN sur CE
+   programme (voir canReviewProgram) — réservé à ADMIN, un EDITOR ne peut pas
+   s'auto-affecter ni affecter un autre EDITOR (voir requireAdminOnly dans
+   les routes). */
+exports.setEditorAccess = async (req, res, next) => {
+  try {
+    const { editorId, action } = req.body;
+    if (!editorId || !["add", "remove"].includes(action)) {
+      return res.status(400).json({ message: 'editorId et action ("add"|"remove") requis' });
+    }
+
+    const Program = getVolunteerProgramModel();
+    const program = await Program.findById(req.params.id);
+    if (!program) return res.status(404).json({ message: "Programme introuvable" });
+
+    const User = getUserModel();
+    const editor = await User.findById(editorId);
+    if (!editor) return res.status(404).json({ message: "Compte introuvable" });
+    if (editor.role !== "EDITOR") {
+      return res.status(400).json({ message: "Ce compte n'a pas le rôle EDITOR" });
+    }
+
+    const already = program.editorIds.some((id) => id.toString() === editor._id.toString());
+    if (action === "add" && !already) {
+      program.editorIds.push(editor._id);
+    } else if (action === "remove" && already) {
+      program.editorIds = program.editorIds.filter((id) => id.toString() !== editor._id.toString());
+    }
+    await program.save();
+
+    res.json({ message: "Affectation éditeur mise à jour", editorIds: program.editorIds });
+  } catch (error) {
+    next(error);
+  }
+};
+
 /* -------------------- ADMIN/EDITOR : bannière "Barre des partenaires" de CE programme -------------------- */
 /* Propre à chaque programme (voir models/volunteerProgram.js#partnersBarImageUrl
    pour le contexte) — seuls les partenaires suivant CE programme la
@@ -332,6 +403,9 @@ exports.uploadPartnersBarImage = async (req, res, next) => {
     const Program = getVolunteerProgramModel();
     const program = await Program.findById(req.params.id);
     if (!program) return res.status(404).json({ message: "Programme introuvable" });
+    if (!canReviewProgram(program, req.user)) {
+      return res.status(403).json({ message: "Vous n'êtes pas autorisé à gérer ce programme" });
+    }
     if (!req.file) return res.status(400).json({ message: "Aucun fichier reçu" });
 
     const uploaded = await new Promise((resolve, reject) => {

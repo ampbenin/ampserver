@@ -6,6 +6,14 @@
  * d'admission que NumSAL (controllers/numsal/courseController.js), adaptée
  * à l'absence de comptes utilisateurs côté volontaires : l'acceptation
  * crée/retrouve un profil Volunteer au lieu d'un compte de connexion.
+ *
+ * Autorisation : partout ci-dessous, "hors d'un programme précis" (liste
+ * sans programId, candidatures spontanées) reste réservé à ADMIN seul
+ * depuis le 2026-08-17 — un EDITOR n'a plus d'accès blanket, seulement aux
+ * programmes qui lui sont affectés (editorIds), donc jamais aux
+ * candidatures spontanées qui n'appartiennent à aucun programme. Dès qu'un
+ * programId est fourni, canReviewProgram tranche normalement (ADMIN toujours,
+ * EDITOR si affecté à CE programme).
  */
 
 const getVolunteerProgramModel = require("../models/volunteerProgram");
@@ -189,7 +197,7 @@ exports.listApplications = async (req, res, next) => {
 
     if (programId === "spontaneous") {
       query.programId = null;
-      if (!["ADMIN", "EDITOR"].includes(req.user.role)) {
+      if (req.user.role !== "ADMIN") {
         return res.status(403).json({ message: "Non autorisé" });
       }
     } else if (programId) {
@@ -200,7 +208,7 @@ exports.listApplications = async (req, res, next) => {
         return res.status(403).json({ message: "Vous n'êtes pas autorisé à consulter les candidatures de ce programme" });
       }
       query.programId = programId;
-    } else if (!["ADMIN", "EDITOR"].includes(req.user.role)) {
+    } else if (req.user.role !== "ADMIN") {
       return res.status(403).json({ message: "Non autorisé" });
     }
 
@@ -273,7 +281,7 @@ exports.acceptApplication = async (req, res, next) => {
       if (!canReviewProgram(program, req.user)) {
         return res.status(403).json({ message: "Vous n'êtes pas autorisé à évaluer ce programme" });
       }
-    } else if (!["ADMIN", "EDITOR"].includes(req.user.role)) {
+    } else if (req.user.role !== "ADMIN") {
       return res.status(403).json({ message: "Non autorisé" });
     }
 
@@ -301,7 +309,7 @@ exports.rejectApplication = async (req, res, next) => {
       if (!canReviewProgram(program, req.user)) {
         return res.status(403).json({ message: "Vous n'êtes pas autorisé à évaluer ce programme" });
       }
-    } else if (!["ADMIN", "EDITOR"].includes(req.user.role)) {
+    } else if (req.user.role !== "ADMIN") {
       return res.status(403).json({ message: "Non autorisé" });
     }
 
@@ -334,7 +342,7 @@ exports.deleteApplication = async (req, res, next) => {
       if (program && !canReviewProgram(program, req.user)) {
         return res.status(403).json({ message: "Vous n'êtes pas autorisé à gérer les candidatures de ce programme" });
       }
-    } else if (!["ADMIN", "EDITOR"].includes(req.user.role)) {
+    } else if (req.user.role !== "ADMIN") {
       return res.status(403).json({ message: "Non autorisé" });
     }
 
@@ -370,7 +378,7 @@ exports.bulkAcceptApplications = async (req, res, next) => {
           program = await Program.findById(application.programId);
           if (!program) { failed.push({ id, message: "Programme introuvable" }); continue; }
           if (!canReviewProgram(program, req.user)) { failed.push({ id, message: "Non autorisé" }); continue; }
-        } else if (!["ADMIN", "EDITOR"].includes(req.user.role)) {
+        } else if (req.user.role !== "ADMIN") {
           failed.push({ id, message: "Non autorisé" });
           continue;
         }
@@ -409,7 +417,7 @@ exports.bulkRejectApplications = async (req, res, next) => {
           const program = await Program.findById(application.programId);
           if (!program) { failed.push({ id, message: "Programme introuvable" }); continue; }
           if (!canReviewProgram(program, req.user)) { failed.push({ id, message: "Non autorisé" }); continue; }
-        } else if (!["ADMIN", "EDITOR"].includes(req.user.role)) {
+        } else if (req.user.role !== "ADMIN") {
           failed.push({ id, message: "Non autorisé" });
           continue;
         }
@@ -445,7 +453,7 @@ exports.deleteAllApplications = async (req, res, next) => {
 
     if (programId === "spontaneous") {
       query.programId = null;
-      if (!["ADMIN", "EDITOR"].includes(req.user.role)) {
+      if (req.user.role !== "ADMIN") {
         return res.status(403).json({ message: "Non autorisé" });
       }
     } else {

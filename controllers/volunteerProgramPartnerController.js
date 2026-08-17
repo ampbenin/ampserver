@@ -17,6 +17,7 @@ const getVolunteerApplicationModel = require("../models/volunteerApplication");
 const getVolunteerProgramPartnerCommentModel = require("../models/volunteerProgramPartnerComment");
 const getPartnerActivityLogModel = require("../models/partnerActivityLog");
 const getUserModel = require("../models/gestionamp/User");
+const { canReviewProgram } = require("./volunteerProgramController");
 const Volunteer = require("../models/volunteer");
 const cloudinary = require("../utils/cloudinary");
 const { computeProgress } = require("../utils/volunteerTaskLogic");
@@ -300,6 +301,13 @@ exports.listMyComments = async (req, res, next) => {
 exports.listPartnerComments = async (req, res, next) => {
   try {
     const { programId } = req.params;
+    const Program = getVolunteerProgramModel();
+    const program = await Program.findById(programId);
+    if (!program) return res.status(404).json({ message: "Programme introuvable" });
+    if (!canReviewProgram(program, req.user)) {
+      return res.status(403).json({ message: "Vous n'êtes pas autorisé à gérer ce programme" });
+    }
+
     const Comment = getVolunteerProgramPartnerCommentModel();
     const comments = await Comment.find({ programId }).sort({ createdAt: -1 });
 
@@ -336,6 +344,13 @@ exports.replyToComment = async (req, res, next) => {
     const Comment = getVolunteerProgramPartnerCommentModel();
     const comment = await Comment.findById(commentId);
     if (!comment) return res.status(404).json({ message: "Commentaire introuvable" });
+
+    const Program = getVolunteerProgramModel();
+    const program = await Program.findById(comment.programId);
+    if (!program) return res.status(404).json({ message: "Programme introuvable" });
+    if (!canReviewProgram(program, req.user)) {
+      return res.status(403).json({ message: "Vous n'êtes pas autorisé à gérer ce programme" });
+    }
 
     comment.reply = reply;
     comment.repliedAt = new Date();
