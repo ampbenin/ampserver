@@ -12,6 +12,7 @@
  */
 
 const mongoose = require("mongoose");
+const ApplicationFieldSchema = require("./shared/applicationFieldSchema");
 
 const VolunteerTaskSubmissionSchema = new mongoose.Schema(
   {
@@ -25,6 +26,16 @@ const VolunteerTaskSubmissionSchema = new mongoose.Schema(
     // clé = field.id — mêmes conventions que VolunteerApplication.responses.
     // Pour un champ IMAGE, la valeur est un tableau d'URLs Cloudinary.
     responses: { type: Map, of: mongoose.Schema.Types.Mixed, default: {} },
+
+    // Copie figée des champs de preuve TELS QU'ILS ÉTAIENT au moment de la
+    // soumission (posée par submitTask) — décision utilisateur, 2026-08-18 :
+    // sans ça, l'affichage d'une preuve se basait sur la définition ACTUELLE
+    // de la tâche (task.proofForm.fields), donc une tâche renommée/modifiée/
+    // supprimée après coup faisait disparaître des réponses pourtant
+    // toujours en base (mauvaise correspondance de champs). Vide ([]) pour
+    // les soumissions faites avant l'ajout de ce champ — listSubmissions
+    // retombe alors sur l'ancien comportement (best-effort) pour celles-là.
+    proofFieldsSnapshot: { type: [ApplicationFieldSchema], default: [] },
 
     status: {
       type: String,

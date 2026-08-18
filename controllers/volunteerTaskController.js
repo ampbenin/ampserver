@@ -143,6 +143,10 @@ exports.submitTask = async (req, res, next) => {
       { programId, volunteerId: volunteer._id, taskId, occurrenceDate: occurrenceKey },
       {
         responses: responses || {},
+        // Figé au moment de CETTE soumission (voir models/volunteerTaskSubmission.js) —
+        // une resoumission après rejet reprend les champs éventuellement
+        // mis à jour depuis, jamais l'ancienne copie.
+        proofFieldsSnapshot: proofFields,
         status: "PENDING",
         submittedAt: new Date(),
         reviewedBy: null,
@@ -306,7 +310,14 @@ exports.listSubmissions = async (req, res, next) => {
         taskPublishedAt: task?.publishedAt || null,
         taskDueAt: task?.dueAt || null,
         reviewerName: s.reviewedBy ? (reviewerNameById.get(String(s.reviewedBy)) || "Compte supprimé") : "",
-        proofFields: task ? getEffectiveProofFields(task) : DEFAULT_PROOF_FIELDS,
+        // Priorité à la copie figée au moment de la soumission (voir
+        // models/volunteerTaskSubmission.js#proofFieldsSnapshot) — fiable
+        // même si la tâche a changé/disparu depuis. Repli sur la définition
+        // actuelle uniquement pour les soumissions faites avant l'ajout de
+        // ce champ (best-effort, peut ne plus correspondre exactement).
+        proofFields: s.proofFieldsSnapshot?.length > 0
+          ? s.proofFieldsSnapshot
+          : task ? getEffectiveProofFields(task) : DEFAULT_PROOF_FIELDS,
       };
     });
 
