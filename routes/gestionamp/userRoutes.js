@@ -14,7 +14,13 @@ const upload = multer({
   fileFilter: (req, file, cb) => cb(null, file.mimetype.startsWith("image/")),
 });
 
-// 🔐 Toutes les routes sont ADMIN uniquement
+// 🔐 Annuaire allégé — ADMIN et EDITOR (avant le verrou ADMIN uniquement
+// ci-dessous : un EDITOR affecté à un programme a besoin de voir la liste
+// du personnel pour affecter superviseurs/partenaires/éditeurs, mais ne
+// doit jamais pouvoir créer/modifier/supprimer un compte).
+router.get("/staff-directory", authMiddleware, roleMiddleware("ADMIN", "EDITOR"), userController.listStaffDirectory);
+
+// 🔐 Toutes les routes ci-dessous sont ADMIN uniquement
 router.use(authMiddleware, roleMiddleware("ADMIN"));
 
 // ➕ Créer un utilisateur EC ou IS

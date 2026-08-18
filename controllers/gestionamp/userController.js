@@ -10,6 +10,28 @@ const getInstitutionSpecialiseeModel = require("../../models/gestionamp/Institut
 const cloudinary = require("../../utils/cloudinary");
 
 /**
+ * @route GET /gestionamp/api/users/staff-directory
+ * @desc Annuaire allégé du personnel — ADMIN et EDITOR (pas seulement
+ * ADMIN, contrairement à getAllUsers ci-dessous). Sert uniquement à
+ * peupler les sélecteurs d'affectation (superviseurs/partenaires/éditeurs)
+ * dans VolunteerProgramEditor.jsx, jamais à gérer les comptes eux-mêmes
+ * (création/modification/suppression restent ADMIN uniquement, voir
+ * routes/gestionamp/userRoutes.js). Champs volontairement réduits : ni mot
+ * de passe, ni jeton de réinitialisation, ni rattachement CC/IS.
+ */
+exports.listStaffDirectory = async (req, res) => {
+  try {
+    const User = getUserModel();
+    const users = await User.find().select(
+      "name email role supervisedAssignments partnerProgramIds partnerLogoUrl"
+    );
+    res.json(users);
+  } catch (error) {
+    res.status(500).json({ message: "Erreur serveur", error: error.message });
+  }
+};
+
+/**
  * @route POST /gestionamp/api/users
  * @desc Créer un utilisateur EC, IS ou EDITOR
  */
