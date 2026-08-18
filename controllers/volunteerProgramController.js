@@ -224,6 +224,9 @@ exports.updateProgramMeta = async (req, res, next) => {
     }
 
     if (Array.isArray(programTasks)) {
+      // Index des tâches AVANT remplacement — sert à détecter les
+      // transitions de statut (voir publishedAt ci-dessous).
+      const existingTasksById = new Map((program.tasks || []).map((t) => [t.id, t]));
       for (const task of programTasks) {
         if (!task.id || !task.title) {
           return res.status(400).json({ message: "Chaque tâche doit avoir un identifiant et un titre" });
@@ -231,11 +234,29 @@ exports.updateProgramMeta = async (req, res, next) => {
         if (!["ONCE", "DAILY", "WEEKLY"].includes(task.recurrence)) {
           return res.status(400).json({ message: `Récurrence invalide pour la tâche "${task.title}"` });
         }
+        if (task.dueAt && Number.isNaN(new Date(task.dueAt).getTime())) {
+          return res.status(400).json({ message: `Date limite invalide pour la tâche "${task.title}"` });
+        }
         const proofFields = task.proofForm?.fields;
         if (Array.isArray(proofFields) && proofFields.length > 0) {
           // Pas de champ verrouillé pour un formulaire de preuve de tâche.
           const proofError = validateFormFieldsDefinition(proofFields, []);
           if (proofError) return res.status(400).json({ message: `Tâche "${task.title}" : ${proofError}` });
+        }
+
+        // publishedAt : horodatage FACTUEL, jamais confié au client — posé
+        // une seule fois, à l'instant réel où le statut passe à PUBLISHED
+        // (ici, ou via resolveScheduledTasks pour une tâche SCHEDULED dont
+        // l'heure arrive toute seule). Une tâche déjà publiée avant l'ajout
+        // de ce champ (2026-08-18) garde publishedAt=null pour toujours :
+        // on ne fabrique jamais une date qu'on ne connaît pas réellement.
+        const existing = existingTasksById.get(task.id);
+        if (existing?.publishedAt) {
+          task.publishedAt = existing.publishedAt;
+        } else if (task.status === "PUBLISHED" && existing?.status !== "PUBLISHED") {
+          task.publishedAt = new Date();
+        } else {
+          task.publishedAt = null;
         }
       }
       program.tasks = programTasks;

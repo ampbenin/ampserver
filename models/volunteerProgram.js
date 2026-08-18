@@ -107,6 +107,20 @@ const VolunteerProgramSchema = new mongoose.Schema(
         // visibles telles quelles, aucune migration nécessaire.
         status: { type: String, enum: ["DRAFT", "SCHEDULED", "PUBLISHED"], default: "PUBLISHED" },
         scheduledPublishAt: { type: Date, default: null },
+        // Horodatage FACTUEL du moment où la tâche est réellement devenue
+        // PUBLISHED (jamais renseigné par le client — calculé côté serveur
+        // dans updateProgramMeta/resolveScheduledTasks, voir
+        // volunteerProgramController.js/volunteerTaskController.js). Reste
+        // `null` pour les tâches créées avant ce champ (2026-08-18) : on ne
+        // fabrique jamais une date qu'on ne connaît pas réellement.
+        publishedAt: { type: Date, default: null },
+        // Date+heure limite au-delà de laquelle plus aucune soumission
+        // n'est acceptée pour CETTE tâche (décision utilisateur,
+        // 2026-08-18 : champ configurable par tâche, distinct de
+        // programEndDate qui reste la limite globale du programme). `null`
+        // = pas de limite propre à la tâche (seule programEndDate compte,
+        // comportement inchangé).
+        dueAt: { type: Date, default: null },
         // Formulaire de preuve spécifique à cette tâche (texte, URL avec
         // aperçu, image(s) uploadées vers Cloudinary...) — même schéma que
         // applicationForm.fields. Si vide, controllers/volunteerTaskController.js

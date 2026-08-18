@@ -80,10 +80,16 @@ exports.getPublishedTasks = getPublishedTasks;
 async function resolveScheduledTasks() {
   try {
     const Program = getVolunteerProgramModel();
+    const now = new Date();
     await Program.updateMany(
-      { "tasks.status": "SCHEDULED", "tasks.scheduledPublishAt": { $lte: new Date() } },
-      { $set: { "tasks.$[t].status": "PUBLISHED" } },
-      { arrayFilters: [{ "t.status": "SCHEDULED", "t.scheduledPublishAt": { $lte: new Date() } }] }
+      { "tasks.status": "SCHEDULED", "tasks.scheduledPublishAt": { $lte: now } },
+      // publishedAt = l'instant réel de la publication automatique, jamais
+      // scheduledPublishAt (qui n'est que l'heure CIBLE) — ce updateMany ne
+      // matche chaque tâche qu'une seule fois (le filtre exige
+      // status:"SCHEDULED", qui devient "PUBLISHED" juste après), donc
+      // aucun risque d'écraser un publishedAt déjà posé.
+      { $set: { "tasks.$[t].status": "PUBLISHED", "tasks.$[t].publishedAt": now } },
+      { arrayFilters: [{ "t.status": "SCHEDULED", "t.scheduledPublishAt": { $lte: now } }] }
     );
   } catch (error) {
     console.error("⚠️ Erreur resolveScheduledTasks (ignorée) :", error.message);
@@ -115,6 +121,9 @@ exports.submitTask = async (req, res, next) => {
     const task = (program.tasks || []).find((t) => t.id === taskId);
     if (!task) return res.status(404).json({ message: "Tâche introuvable" });
     if (!isTaskPublished(task)) return res.status(409).json({ message: "Cette tâche n'est pas encore publiée" });
+    if (task.dueAt && new Date(task.dueAt) <= new Date()) {
+      return res.status(409).json({ message: "Le délai de soumission pour cette tâche est dépassé" });
+    }
 
     let occurrenceKey = null;
     if (task.recurrence !== "ONCE") {
@@ -206,11 +215,18 @@ exports.getMyProgramProgress = async (req, res, next) => {
           status: submission?.status || "TODO",
           responses: submission?.responses || {},
           reviewNote: submission?.reviewNote || "",
+          // Horodatages "style WhatsApp" affichés côté volontaire (décision
+          // utilisateur, 2026-08-18) — jamais reviewedBy (identité du
+          // staff), volontairement absent ici.
+          submittedAt: submission?.submittedAt || null,
+          reviewedAt: submission?.reviewedAt || null,
         };
       });
       return {
         id: task.id, title: task.title, description: task.description, recurrence: task.recurrence,
         proofFields: getEffectiveProofFields(task),
+        publishedAt: task.publishedAt || null,
+        dueAt: task.dueAt || null,
         occurrences,
       };
     });
@@ -270,6 +286,13 @@ exports.listSubmissions = async (req, res, next) => {
       ? await resolveGroupAndSupervisorNames(programId, volunteerIds)
       : { groupNamesByVolunteerId: new Map(), supervisorNamesByVolunteerId: new Map() };
 
+    // Qui a validé/rejeté chaque soumission — staff uniquement, jamais
+    // exposé au volontaire (getMyProgramProgress ne renvoie pas reviewedBy).
+    const reviewerIds = [...new Set(submissions.filter((s) => s.reviewedBy).map((s) => String(s.reviewedBy)))];
+    const User = getUserModel();
+    const reviewers = reviewerIds.length > 0 ? await User.find({ _id: { $in: reviewerIds } }).select("name") : [];
+    const reviewerNameById = new Map(reviewers.map((r) => [String(r._id), r.name]));
+
     const items = submissions.map((s) => {
       const volunteer = volunteerById.get(String(s.volunteerId));
       const task = taskById.get(s.taskId);
@@ -280,6 +303,9 @@ exports.listSubmissions = async (req, res, next) => {
         groupNames: groupNamesByVolunteerId.get(String(s.volunteerId)) || [],
         supervisorNames: supervisorNamesByVolunteerId.get(String(s.volunteerId)) || [],
         taskTitle: task?.title || "Tâche supprimée",
+        taskPublishedAt: task?.publishedAt || null,
+        taskDueAt: task?.dueAt || null,
+        reviewerName: s.reviewedBy ? (reviewerNameById.get(String(s.reviewedBy)) || "Compte supprimé") : "",
         proofFields: task ? getEffectiveProofFields(task) : DEFAULT_PROOF_FIELDS,
       };
     });
