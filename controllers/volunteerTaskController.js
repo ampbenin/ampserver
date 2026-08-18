@@ -263,6 +263,13 @@ exports.listSubmissions = async (req, res, next) => {
     const volunteerById = new Map(volunteers.map((v) => [String(v._id), v]));
     const taskById = new Map((program.tasks || []).map((t) => [t.id, t]));
 
+    // Groupe + superviseur affecté, affichés devant chaque soumission (même
+    // besoin que dans la progression par volontaire, décision utilisateur
+    // 2026-08-18).
+    const { groupNamesByVolunteerId, supervisorNamesByVolunteerId } = volunteerIds.length > 0
+      ? await resolveGroupAndSupervisorNames(programId, volunteerIds)
+      : { groupNamesByVolunteerId: new Map(), supervisorNamesByVolunteerId: new Map() };
+
     const items = submissions.map((s) => {
       const volunteer = volunteerById.get(String(s.volunteerId));
       const task = taskById.get(s.taskId);
@@ -270,6 +277,8 @@ exports.listSubmissions = async (req, res, next) => {
         ...s,
         volunteerName: volunteer ? `${volunteer.prenom} ${volunteer.nom}` : "Volontaire introuvable",
         volunteerEmail: volunteer?.email || "",
+        groupNames: groupNamesByVolunteerId.get(String(s.volunteerId)) || [],
+        supervisorNames: supervisorNamesByVolunteerId.get(String(s.volunteerId)) || [],
         taskTitle: task?.title || "Tâche supprimée",
         proofFields: task ? getEffectiveProofFields(task) : DEFAULT_PROOF_FIELDS,
       };
@@ -323,6 +332,57 @@ async function reviewSubmission(req, res, next, newStatus) {
 exports.approveSubmission = (req, res, next) => reviewSubmission(req, res, next, "APPROVED");
 exports.rejectSubmission = (req, res, next) => reviewSubmission(req, res, next, "REJECTED");
 
+/* -------------------- Interne : groupe(s)/superviseur(s) d'un volontaire sur CE programme -------------------- */
+/* Résout deux informations utiles au staff dans le suivi des tâches
+   (décision utilisateur, 2026-08-18 : "pour chaque volontaire, on voit
+   devant lui son groupe pour le programme et le superviseur auquel il est
+   affecté") :
+   - le(s) nom(s) de groupe — VolunteerApplicationGroup référence des
+     candidatures, jamais des volontaires directement, donc il faut
+     d'abord retrouver la candidature de CE volontaire sur CE programme
+     (VolunteerApplication.volunteerId, rempli à l'acceptation) ;
+   - le(s) nom(s) du/des superviseur(s) auquel il est affecté
+     (GestionAmpUser.supervisedAssignments, programme par programme).
+   Un volontaire peut en théorie appartenir à plusieurs groupes ou être
+   affecté à plusieurs superviseurs — les deux Maps renvoient des tableaux
+   (souvent à un seul élément en pratique). */
+async function resolveGroupAndSupervisorNames(programId, volunteerIds) {
+  const Application = getVolunteerApplicationModel();
+  const applications = await Application.find({ programId, volunteerId: { $in: volunteerIds } }).select("volunteerId");
+  const applicationIdByVolunteerId = new Map(applications.map((a) => [String(a.volunteerId), String(a._id)]));
+
+  const Group = getVolunteerApplicationGroupModel();
+  const groups = await Group.find({ programId }).select("name applicationIds");
+  const groupNamesByApplicationId = new Map();
+  groups.forEach((g) => {
+    g.applicationIds.forEach((appId) => {
+      const key = String(appId);
+      if (!groupNamesByApplicationId.has(key)) groupNamesByApplicationId.set(key, []);
+      groupNamesByApplicationId.get(key).push(g.name);
+    });
+  });
+  const groupNamesByVolunteerId = new Map();
+  volunteerIds.forEach((vid) => {
+    const appId = applicationIdByVolunteerId.get(String(vid));
+    groupNamesByVolunteerId.set(String(vid), appId ? (groupNamesByApplicationId.get(appId) || []) : []);
+  });
+
+  const User = getUserModel();
+  const supervisors = await User.find({ role: "SUPERVISEUR", "supervisedAssignments.programId": programId })
+    .select("name supervisedAssignments");
+  const supervisorNamesByVolunteerId = new Map();
+  supervisors.forEach((sup) => {
+    const assignment = (sup.supervisedAssignments || []).find((a) => String(a.programId) === String(programId));
+    (assignment?.volunteerIds || []).forEach((vid) => {
+      const key = String(vid);
+      if (!supervisorNamesByVolunteerId.has(key)) supervisorNamesByVolunteerId.set(key, []);
+      supervisorNamesByVolunteerId.get(key).push(sup.name);
+    });
+  });
+
+  return { groupNamesByVolunteerId, supervisorNamesByVolunteerId };
+}
+
 /* -------------------- Staff : progression de tous les volontaires d'un programme -------------------- */
 exports.listProgramProgress = async (req, res, next) => {
   try {
@@ -359,40 +419,21 @@ exports.listProgramProgress = async (req, res, next) => {
       submissionsByVolunteer.get(key).push(s);
     });
 
-    // Nom du/des groupe(s) d'un volontaire — VolunteerApplicationGroup
-    // référence des candidatures (applicationIds), jamais des volontaires
-    // directement, donc il faut d'abord retrouver la candidature de CE
-    // volontaire sur CE programme (VolunteerApplication.volunteerId, rempli
-    // à l'acceptation) avant de résoudre les groupes qui la contiennent.
-    const Application = getVolunteerApplicationModel();
-    const applications = await Application.find({ programId, volunteerId: { $in: volunteers.map((v) => v._id) } })
-      .select("volunteerId");
-    const applicationIdByVolunteerId = new Map(applications.map((a) => [String(a.volunteerId), String(a._id)]));
-
-    const Group = getVolunteerApplicationGroupModel();
-    const groups = await Group.find({ programId }).select("name applicationIds");
-    const groupNamesByApplicationId = new Map();
-    groups.forEach((g) => {
-      g.applicationIds.forEach((appId) => {
-        const key = String(appId);
-        if (!groupNamesByApplicationId.has(key)) groupNamesByApplicationId.set(key, []);
-        groupNamesByApplicationId.get(key).push(g.name);
-      });
-    });
+    const { groupNamesByVolunteerId, supervisorNamesByVolunteerId } =
+      await resolveGroupAndSupervisorNames(programId, volunteers.map((v) => v._id));
 
     const items = volunteers.map((v) => {
       const programEntry = v.programs.find((p) => p.programId.toString() === programId);
       const submissions = submissionsByVolunteer.get(String(v._id)) || [];
       const progress = computeProgress(publishedTasks, programEntry.assignedAt, program.endDate, submissions);
-      const applicationId = applicationIdByVolunteerId.get(String(v._id));
-      const groupNames = applicationId ? (groupNamesByApplicationId.get(applicationId) || []) : [];
       return {
         volunteerId: v._id,
         nom: v.nom,
         prenom: v.prenom,
         email: v.email,
         telephone: v.telephone || "",
-        groupNames,
+        groupNames: groupNamesByVolunteerId.get(String(v._id)) || [],
+        supervisorNames: supervisorNamesByVolunteerId.get(String(v._id)) || [],
         statut: programEntry.statut,
         progress,
       };
