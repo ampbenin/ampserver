@@ -25,7 +25,9 @@ router.get("/my-supervised-programs", authMiddleware, ctrl.listMySupervisedProgr
 router.get("/submissions", authMiddleware, ctrl.listSubmissions);
 router.patch("/submissions/:id/accept", authMiddleware, ctrl.approveSubmission);
 router.patch("/submissions/:id/reject", authMiddleware, ctrl.rejectSubmission);
+router.patch("/submissions/:id/internal-note", authMiddleware, ctrl.setSubmissionInternalNote);
 router.get("/programs/:programId/progress", authMiddleware, ctrl.listProgramProgress);
 router.post("/programs/:programId/finalize", authMiddleware, ctrl.finalizeMissions);
+router.post("/programs/:programId/reactivate-final-report", authMiddleware, ctrl.reactivateFinalReport);
 
 module.exports = router;

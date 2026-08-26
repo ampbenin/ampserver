@@ -259,6 +259,16 @@ exports.updateProgramMeta = async (req, res, next) => {
           task.publishedAt = null;
         }
       }
+
+      // Une seule tâche "rapport de fin de mission" par programme —
+      // approuver CELLE-LÀ clôture individuellement la mission d'un
+      // volontaire (voir reviewSubmission, volunteerTaskController.js),
+      // ambigu si plusieurs tâches portaient ce flag à la fois.
+      const finalReportCount = programTasks.filter((t) => t.isFinalReport).length;
+      if (finalReportCount > 1) {
+        return res.status(400).json({ message: "Un seul rapport de fin de mission est autorisé par programme" });
+      }
+
       program.tasks = programTasks;
     }
     if (missionValidationThreshold !== undefined) {

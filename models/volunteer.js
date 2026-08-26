@@ -61,6 +61,18 @@ const VolunteerSchema = new mongoose.Schema(
           default: "Non disponible",
         },
         assignedAt: { type: Date, default: Date.now },
+        // Réactivation ciblée du rapport de fin de mission (décision
+        // utilisateur, 2026-08-19 : "on peut réactiver la même tâche
+        // rapport final à certains volontaires, même si la mission est
+        // marquée terminée") — présence = SEULE la tâche isFinalReport de
+        // ce programme reste soumissible/évaluable pour CE volontaire
+        // malgré statut !== "Non disponible" (voir
+        // isVolunteerMissionClosed, controllers/volunteerTaskController.js).
+        // Posé par reactivateFinalReport (ADMIN/EDITOR uniquement), effacé
+        // automatiquement dès que le rapport réactivé est de nouveau
+        // approuvé (laissé tel quel s'il est rejeté, pour permettre une
+        // nouvelle tentative).
+        finalReportReopenedAt: { type: Date, default: null },
       },
     ],
 

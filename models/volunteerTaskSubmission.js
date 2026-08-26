@@ -47,6 +47,14 @@ const VolunteerTaskSubmissionSchema = new mongoose.Schema(
     reviewedBy: { type: mongoose.Schema.Types.ObjectId, ref: "GestionAmpUser", default: null },
     reviewedAt: { type: Date, default: null },
     reviewNote: { type: String, default: "" },
+
+    // Note libre du staff (outil de traitement du rapport de fin de
+    // mission, décision utilisateur 2026-08-19) — jamais renvoyée au
+    // volontaire (absente de getMyProgramProgress/listSubmissions côté
+    // volontaire), distincte de reviewNote (motif de rejet, visible du
+    // volontaire). Modifiable quel que soit le statut de la soumission,
+    // y compris après approbation/rejet.
+    internalNote: { type: String, default: "" },
   },
   { timestamps: true }
 );

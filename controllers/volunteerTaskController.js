@@ -71,6 +71,26 @@ function isTaskPublished(task) {
 const getPublishedTasks = (program) => (program.tasks || []).filter(isTaskPublished);
 exports.getPublishedTasks = getPublishedTasks;
 
+/* -------------------- Interne : tâches publiées HORS rapport de fin de mission -------------------- */
+/* Le rapport de fin de mission (task.isFinalReport) ne compte jamais dans
+   le % de progression (décision utilisateur, 2026-08-19) — utilisé à la
+   place de getPublishedTasks partout où computeProgress est appelé.
+   getPublishedTasks (non filtrée) reste utilisée pour l'affichage complet
+   de la liste des tâches : le rapport final doit rester visible, juste
+   exclu du calcul. */
+const getRegularTasks = (program) => getPublishedTasks(program).filter((t) => !t.isFinalReport);
+
+/* -------------------- Interne : mission déjà clôturée pour ce volontaire sur ce programme -------------------- */
+/* Un statut différent de "Non disponible" signifie que la mission de ce
+   volontaire est déjà tranchée — soit via l'approbation de son rapport de
+   fin de mission (clôture individuelle immédiate, voir reviewSubmission),
+   soit via "Terminer les missions" (balayage global, voir
+   finalizeMissions). Dans les deux cas, plus aucune tâche/rapport n'est
+   modifiable pour ce volontaire ensuite (décision utilisateur,
+   2026-08-19), sauf réactivation ciblée du rapport final (voir
+   reactivateFinalReport / programEntry.finalReportReopenedAt). */
+const isVolunteerMissionClosed = (programEntry) => programEntry.statut !== "Non disponible";
+
 /* -------------------- Interne : republie en base les tâches SCHEDULED échues -------------------- */
 /* Même pattern que closeExpiredPrograms (volunteerProgramController.js) :
    vérification paresseuse à la lecture plutôt qu'un cron. Best-effort — ne
@@ -114,15 +134,29 @@ exports.submitTask = async (req, res, next) => {
     const Program = getVolunteerProgramModel();
     const program = await Program.findById(programId);
     if (!program) return res.status(404).json({ message: "Programme introuvable" });
-    if (program.missionsFinalizedAt) {
-      return res.status(409).json({ message: "Les missions de ce programme sont terminées, plus aucune soumission n'est acceptée" });
-    }
 
     const task = (program.tasks || []).find((t) => t.id === taskId);
     if (!task) return res.status(404).json({ message: "Tâche introuvable" });
     if (!isTaskPublished(task)) return res.status(409).json({ message: "Cette tâche n'est pas encore publiée" });
     if (task.dueAt && new Date(task.dueAt) <= new Date()) {
       return res.status(409).json({ message: "Le délai de soumission pour cette tâche est dépassé" });
+    }
+
+    // Mission déjà clôturée pour CE volontaire (via son rapport final
+    // approuvé, ou "Terminer les missions", qui pose aussi
+    // program.missionsFinalizedAt) — plus aucune soumission, sauf
+    // réactivation ciblée du rapport final (décision utilisateur,
+    // 2026-08-19 : "même si la mission est marquée terminée"), qui doit
+    // bypasser LES DEUX verrous (mission individuelle ET programme
+    // globalement finalisé) pour cette tâche-là uniquement.
+    const finalReportReopened = task.isFinalReport && !!programEntry.finalReportReopenedAt;
+    if (!finalReportReopened) {
+      if (program.missionsFinalizedAt) {
+        return res.status(409).json({ message: "Les missions de ce programme sont terminées, plus aucune soumission n'est acceptée" });
+      }
+      if (isVolunteerMissionClosed(programEntry)) {
+        return res.status(409).json({ message: "Votre mission sur ce programme est terminée, plus aucune soumission n'est possible" });
+      }
     }
 
     let occurrenceKey = null;
@@ -198,7 +232,12 @@ exports.getMyProgramProgress = async (req, res, next) => {
     if (!programEntry) return res.status(403).json({ message: "Vous n'êtes pas rattaché(e) à ce programme" });
 
     const Program = getVolunteerProgramModel();
-    const program = await Program.findById(programId).select("title tasks missionValidationThreshold endDate");
+    // brandColor ajouté (2026-08-19) pour TaskTypeformForm.jsx — même
+    // dérivation de palette que VolunteerApplicationForm.jsx (le
+    // volontaire n'a accès ni à GET /api/volunteer-programs/:id ni à
+    // /application-form une fois accepté, cette réponse est sa seule
+    // source côté "Mon espace").
+    const program = await Program.findById(programId).select("title tasks missionValidationThreshold endDate brandColor");
     if (!program) return res.status(404).json({ message: "Programme introuvable" });
 
     const publishedTasks = getPublishedTasks(program);
@@ -231,16 +270,31 @@ exports.getMyProgramProgress = async (req, res, next) => {
         proofFields: getEffectiveProofFields(task),
         publishedAt: task.publishedAt || null,
         dueAt: task.dueAt || null,
+        // Affichage spécial du rapport de fin de mission côté
+        // ProgramProgress.jsx (section à part, jamais mélangé aux
+        // occurrences filtrées) + lien Typeform si displayStyle le prévoit
+        // (décision utilisateur, 2026-08-19).
+        isFinalReport: !!task.isFinalReport,
+        displayStyle: task.displayStyle || "STANDARD",
         occurrences,
       };
     });
 
-    const progress = computeProgress(publishedTasks, programEntry.assignedAt, program.endDate, submissions);
+    // Le rapport de fin de mission ne compte jamais dans le % (voir
+    // getRegularTasks) — sinon inchangé.
+    const progress = computeProgress(getRegularTasks(program), programEntry.assignedAt, program.endDate, submissions);
 
     res.json({
       programTitle: program.title,
+      brandColor: program.brandColor || "",
       missionValidationThreshold: program.missionValidationThreshold,
       missionStatus: programEntry.statut,
+      // Bannière de clôture + verrouillage des soumissions côté
+      // ProgramProgress.jsx (décision utilisateur, 2026-08-19) —
+      // finalReportReopened = seule la tâche isFinalReport reste
+      // soumissible malgré missionClosed (voir submitTask/reviewSubmission).
+      missionClosed: isVolunteerMissionClosed(programEntry),
+      finalReportReopened: !!programEntry.finalReportReopenedAt,
       tasks,
       progress,
     });
@@ -309,6 +363,11 @@ exports.listSubmissions = async (req, res, next) => {
         taskTitle: task?.title || "Tâche supprimée",
         taskPublishedAt: task?.publishedAt || null,
         taskDueAt: task?.dueAt || null,
+        // Filtre l'onglet "Rapports" côté staff (décision utilisateur,
+        // 2026-08-19) — jamais recalculé côté client, la tâche a pu être
+        // supprimée depuis (false dans ce cas, cohérent avec taskTitle
+        // ci-dessus).
+        isFinalReport: task?.isFinalReport || false,
         reviewerName: s.reviewedBy ? (reviewerNameById.get(String(s.reviewedBy)) || "Compte supprimé") : "",
         // Priorité à la copie figée au moment de la soumission (voir
         // models/volunteerTaskSubmission.js#proofFieldsSnapshot) — fiable
@@ -344,6 +403,25 @@ async function reviewSubmission(req, res, next, newStatus) {
       return res.status(403).json({ message: "Vous n'êtes pas autorisé à évaluer cette soumission" });
     }
 
+    const task = (program.tasks || []).find((t) => t.id === submission.taskId);
+
+    // Volontaire concerné — chargé ici (pas seulement pour l'autorisation)
+    // car nécessaire pour vérifier la clôture de mission ET, en cas
+    // d'approbation du rapport final, pour la clôturer immédiatement.
+    const volunteer = await Volunteer.findById(submission.volunteerId);
+    if (!volunteer) return res.status(404).json({ message: "Volontaire introuvable" });
+    const programEntry = volunteer.programs.find((p) => p.programId.toString() === submission.programId.toString());
+    if (!programEntry) return res.status(404).json({ message: "Ce volontaire n'est plus rattaché à ce programme" });
+
+    // Mission déjà clôturée pour ce volontaire — même verrou que
+    // submitTask, même bypass pour un rapport final réactivé (décision
+    // utilisateur, 2026-08-19 : "même pas un superviseur ne peut plus
+    // rejeter ni valider une tâche ou rapport final").
+    const finalReportReopened = task?.isFinalReport && !!programEntry.finalReportReopenedAt;
+    if (isVolunteerMissionClosed(programEntry) && !finalReportReopened) {
+      return res.status(409).json({ message: "La mission de ce volontaire sur ce programme est déjà terminée" });
+    }
+
     const reviewNote = req.body?.reviewNote?.trim() || "";
     if (newStatus === "REJECTED" && !reviewNote) {
       return res.status(400).json({ message: "Une observation expliquant le motif du rejet est requise" });
@@ -355,10 +433,22 @@ async function reviewSubmission(req, res, next, newStatus) {
     submission.reviewNote = reviewNote;
     await submission.save();
 
-    // Plus de promotion automatique en direct ici — le statut mission
-    // (validée/refusée) ne se décide qu'au moment où le staff clique sur
-    // "Terminer les missions" (voir exports.finalizeMissions), qui évalue
-    // tous les volontaires du programme d'un coup.
+    // Pas de promotion automatique en direct pour une tâche NORMALE — le
+    // statut mission (validée/refusée) ne se décide qu'au moment où le
+    // staff clique sur "Terminer les missions" (voir
+    // exports.finalizeMissions), qui évalue tous les volontaires du
+    // programme d'un coup. SEULE exception, décision utilisateur
+    // 2026-08-19 : approuver LE rapport de fin de mission clôture
+    // immédiatement la mission de CE volontaire, sans attendre — c'est
+    // par construction son dernier jalon. Toujours réécrit (même si déjà
+    // "Mission validée"/"Refusé") : contrairement au balayage automatique
+    // de finalizeMissions, c'est une action manuelle explicite du staff
+    // (utile notamment après une réactivation ciblée).
+    if (newStatus === "APPROVED" && task?.isFinalReport) {
+      programEntry.statut = "Mission validée";
+      programEntry.finalReportReopenedAt = null;
+      await volunteer.save();
+    }
 
     res.json({ message: newStatus === "APPROVED" ? "Tâche approuvée" : "Tâche rejetée" });
   } catch (error) {
@@ -428,7 +518,9 @@ exports.listProgramProgress = async (req, res, next) => {
     const Program = getVolunteerProgramModel();
     const program = await Program.findById(programId).select("title tasks missionValidationThreshold endDate reviewerIds editorIds");
     if (!program) return res.status(404).json({ message: "Programme introuvable" });
-    const publishedTasks = getPublishedTasks(program);
+    // Le rapport de fin de mission ne compte jamais dans le % (voir
+    // getRegularTasks).
+    const regularTasks = getRegularTasks(program);
 
     const volunteerQuery = { "programs.programId": programId };
 
@@ -462,7 +554,7 @@ exports.listProgramProgress = async (req, res, next) => {
     const items = volunteers.map((v) => {
       const programEntry = v.programs.find((p) => p.programId.toString() === programId);
       const submissions = submissionsByVolunteer.get(String(v._id)) || [];
-      const progress = computeProgress(publishedTasks, programEntry.assignedAt, program.endDate, submissions);
+      const progress = computeProgress(regularTasks, programEntry.assignedAt, program.endDate, submissions);
       return {
         volunteerId: v._id,
         nom: v.nom,
@@ -506,8 +598,20 @@ exports.finalizeMissions = async (req, res, next) => {
       return res.status(409).json({ message: "Les missions de ce programme ont déjà été terminées" });
     }
 
-    const publishedTasks = getPublishedTasks(program);
-    if (publishedTasks.length === 0) {
+    // Bloqué tant que la date limite du rapport de fin de mission (si
+    // définie) n'est pas dépassée (décision utilisateur, 2026-08-19) —
+    // évite de clore/refuser en masse des volontaires qui ont encore le
+    // temps de soumettre leur rapport. Pas de dueAt sur cette tâche = pas
+    // de porte (comportement inchangé).
+    const finalReportTask = getPublishedTasks(program).find((t) => t.isFinalReport);
+    if (finalReportTask?.dueAt && new Date(finalReportTask.dueAt) > new Date()) {
+      return res.status(409).json({ message: "Le délai de soumission du rapport final n'est pas encore passé" });
+    }
+
+    // Le rapport de fin de mission ne compte jamais dans le % (voir
+    // getRegularTasks).
+    const regularTasks = getRegularTasks(program);
+    if (regularTasks.length === 0) {
       return res.status(400).json({ message: "Ce programme n'a aucune tâche publiée à évaluer" });
     }
 
@@ -522,7 +626,7 @@ exports.finalizeMissions = async (req, res, next) => {
       if (!programEntry || programEntry.statut !== "Non disponible") continue; // jamais de rétrogradation
 
       const submissions = await Submission.find({ programId, volunteerId: volunteer._id }).lean();
-      const { percent } = computeProgress(publishedTasks, programEntry.assignedAt, program.endDate, submissions);
+      const { percent } = computeProgress(regularTasks, programEntry.assignedAt, program.endDate, submissions);
 
       if (percent >= program.missionValidationThreshold) {
         programEntry.statut = "Mission validée";
@@ -538,6 +642,96 @@ exports.finalizeMissions = async (req, res, next) => {
     await program.save();
 
     res.json({ validated, refused });
+  } catch (error) {
+    next(error);
+  }
+};
+
+/* -------------------- Staff : note interne sur une soumission -------------------- */
+/* Outil de traitement du rapport de fin de mission (décision utilisateur,
+   2026-08-19) — distinct de reviewNote (motif de rejet, visible du
+   volontaire) : jamais exposé côté "Mon espace" (voir
+   getMyProgramProgress, qui ne le renvoie pas). Modifiable quel que soit
+   le statut de la soumission (pas de garde "déjà traité", contrairement à
+   reviewSubmission) — une note de suivi n'a pas besoin d'attendre. */
+exports.setSubmissionInternalNote = async (req, res, next) => {
+  try {
+    const Submission = getVolunteerTaskSubmissionModel();
+    const submission = await Submission.findById(req.params.id);
+    if (!submission) return res.status(404).json({ message: "Soumission introuvable" });
+
+    const Program = getVolunteerProgramModel();
+    const program = await Program.findById(submission.programId);
+    if (!program) return res.status(404).json({ message: "Programme introuvable" });
+    if (!(await canSuperviseVolunteer(program, submission.volunteerId, req.user))) {
+      return res.status(403).json({ message: "Vous n'êtes pas autorisé à annoter cette soumission" });
+    }
+
+    submission.internalNote = (req.body?.internalNote || "").toString();
+    await submission.save();
+
+    res.json({ message: "Note enregistrée" });
+  } catch (error) {
+    next(error);
+  }
+};
+
+/* -------------------- Staff (ADMIN/EDITOR) : réactiver le rapport final pour certains volontaires -------------------- */
+/* Cas spécial explicitement demandé (2026-08-19) : "même si la mission est
+   marquée terminée, on peut réactiver la même tâche rapport final à
+   certains volontaires (soit à tout un groupe ou à un seul volontaire)".
+   Ne touche QUE programEntry.finalReportReopenedAt — jamais le statut lui-
+   même (repositionné seulement par une nouvelle approbation, voir
+   reviewSubmission) et jamais les autres tâches (qui restent verrouillées
+   pour ce volontaire tant que sa mission est clôturée). Autorisation
+   canReviewProgram — jamais les superviseurs, comme "Terminer les
+   missions" : action de gestion de programme. */
+exports.reactivateFinalReport = async (req, res, next) => {
+  try {
+    const { programId } = req.params;
+    const { volunteerIds, groupId } = req.body || {};
+
+    const Program = getVolunteerProgramModel();
+    const program = await Program.findById(programId).select("tasks reviewerIds editorIds");
+    if (!program) return res.status(404).json({ message: "Programme introuvable" });
+    if (!canReviewProgram(program, req.user)) {
+      return res.status(403).json({ message: "Vous n'êtes pas autorisé à gérer ce programme" });
+    }
+
+    const finalReportTask = (program.tasks || []).find((t) => t.isFinalReport);
+    if (!finalReportTask) {
+      return res.status(400).json({ message: "Ce programme n'a pas de tâche \"rapport de fin de mission\"" });
+    }
+
+    // Résout le groupe → candidatures ACCEPTED → volontaires, même logique
+    // que resolveGroupAndSupervisorNames (l'inverse : ici on part du
+    // groupe pour retrouver ses volontaires, pas l'inverse).
+    const targetIds = new Set((Array.isArray(volunteerIds) ? volunteerIds : []).map(String));
+    if (groupId) {
+      const Group = getVolunteerApplicationGroupModel();
+      const group = await Group.findOne({ _id: groupId, programId }).select("applicationIds");
+      if (!group) return res.status(404).json({ message: "Groupe introuvable" });
+      const Application = getVolunteerApplicationModel();
+      const applications = await Application.find({ _id: { $in: group.applicationIds } }).select("volunteerId");
+      applications.forEach((a) => { if (a.volunteerId) targetIds.add(String(a.volunteerId)); });
+    }
+
+    if (targetIds.size === 0) {
+      return res.status(400).json({ message: "Aucun volontaire ciblé" });
+    }
+
+    const volunteers = await Volunteer.find({ _id: { $in: [...targetIds] }, "programs.programId": programId });
+
+    let reactivated = 0;
+    for (const volunteer of volunteers) {
+      const programEntry = volunteer.programs.find((p) => p.programId.toString() === programId);
+      if (!programEntry) continue;
+      programEntry.finalReportReopenedAt = new Date();
+      await volunteer.save();
+      reactivated += 1;
+    }
+
+    res.json({ reactivated });
   } catch (error) {
     next(error);
   }

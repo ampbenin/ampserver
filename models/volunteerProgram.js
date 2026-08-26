@@ -121,6 +121,21 @@ const VolunteerProgramSchema = new mongoose.Schema(
         // = pas de limite propre à la tâche (seule programEndDate compte,
         // comportement inchangé).
         dueAt: { type: Date, default: null },
+        // Rendu du formulaire de soumission côté volontaire — STANDARD =
+        // formulaire compact actuel (inchangé), TYPEFORM = assistant plein
+        // écran façon candidature (voir VolunteerApplicationForm.jsx /
+        // TaskTypeformForm.jsx). Réglage par tâche, n'importe laquelle
+        // (décision utilisateur, 2026-08-19 : pas réservé au rapport final).
+        displayStyle: { type: String, enum: ["STANDARD", "TYPEFORM"], default: "STANDARD" },
+        // Marque LA tâche "rapport de fin de mission" de ce programme (une
+        // seule autorisée — voir la validation dans
+        // volunteerProgramController.js#updateProgramMeta). Flag
+        // sémantique, indépendant de displayStyle : ne compte jamais dans
+        // le % de progression (voir getRegularTasks,
+        // volunteerTaskController.js), et son approbation clôture
+        // immédiatement la mission du volontaire concerné (voir
+        // reviewSubmission) plutôt que d'attendre "Terminer les missions".
+        isFinalReport: { type: Boolean, default: false },
         // Formulaire de preuve spécifique à cette tâche (texte, URL avec
         // aperçu, image(s) uploadées vers Cloudinary...) — même schéma que
         // applicationForm.fields. Si vide, controllers/volunteerTaskController.js
