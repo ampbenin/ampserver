@@ -138,18 +138,23 @@ exports.submitTask = async (req, res, next) => {
     const task = (program.tasks || []).find((t) => t.id === taskId);
     if (!task) return res.status(404).json({ message: "Tâche introuvable" });
     if (!isTaskPublished(task)) return res.status(409).json({ message: "Cette tâche n'est pas encore publiée" });
-    if (task.dueAt && new Date(task.dueAt) <= new Date()) {
-      return res.status(409).json({ message: "Le délai de soumission pour cette tâche est dépassé" });
-    }
 
     // Mission déjà clôturée pour CE volontaire (via son rapport final
     // approuvé, ou "Terminer les missions", qui pose aussi
     // program.missionsFinalizedAt) — plus aucune soumission, sauf
     // réactivation ciblée du rapport final (décision utilisateur,
     // 2026-08-19 : "même si la mission est marquée terminée"), qui doit
-    // bypasser LES DEUX verrous (mission individuelle ET programme
-    // globalement finalisé) pour cette tâche-là uniquement.
+    // bypasser TOUS les verrous qui bloqueraient sinon cette tâche-là en
+    // particulier — y compris sa propre date limite (task.dueAt) : en
+    // pratique, un rapport final n'est réactivé qu'APRÈS que sa date
+    // limite soit passée (c'est même une condition pour que "Terminer les
+    // missions" ait pu tourner, voir finalizeMissions), donc sans ce
+    // bypass la réactivation serait toujours immédiatement inutilisable.
     const finalReportReopened = task.isFinalReport && !!programEntry.finalReportReopenedAt;
+
+    if (!finalReportReopened && task.dueAt && new Date(task.dueAt) <= new Date()) {
+      return res.status(409).json({ message: "Le délai de soumission pour cette tâche est dépassé" });
+    }
     if (!finalReportReopened) {
       if (program.missionsFinalizedAt) {
         return res.status(409).json({ message: "Les missions de ce programme sont terminées, plus aucune soumission n'est acceptée" });
