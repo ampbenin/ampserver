@@ -3,22 +3,19 @@ const router = express.Router();
 const {
   fetchVolunteersForCertificate,
   generateCertificate,
-  downloadCertificate,
   verifyAttestation,
 } = require("../controllers/certificateController");
 const authMiddleware = require("../middlewares/gestionamp/authMiddleware");
-const roleMiddleware = require("../middlewares/gestionamp/roleMiddleware");
 
-const requireEditor = [authMiddleware, roleMiddleware("ADMIN", "EDITOR")];
+// 🔐 Staff (ADMIN, ou EDITOR affecté à CE programme — voir canReviewProgram
+// dans le contrôleur, même porte que le reste du chantier volontaires).
+// Scopées par programme (2026-08-19) — remplace l'ancien schéma par titre.
+router.get("/programs/:programId/eligible-volunteers", authMiddleware, fetchVolunteersForCertificate);
+router.post("/programs/:programId/generate", authMiddleware, generateCertificate);
 
-// 🔐 Outils internes de génération (espace admin uniquement)
-router.post("/fetch-volunteers", ...requireEditor, fetchVolunteersForCertificate);
-router.post("/generate", ...requireEditor, generateCertificate);
-
-// 🌐 Auto-service public : le volontaire télécharge sa propre attestation
-router.post("/download", downloadCertificate);
-
-// 🌐 QR Code public → vérification d'une attestation
+// 🌐 QR Code public → vérification d'une attestation (auto-service de
+// téléchargement par email/nom supprimé le 2026-08-19 — chaque volontaire
+// télécharge désormais depuis son espace authentifié, "Mon espace").
 router.get("/verify/:id", verifyAttestation);
 
 module.exports = router;

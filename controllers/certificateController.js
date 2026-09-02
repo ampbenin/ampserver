@@ -1,5 +1,6 @@
 const Volunteer = require("../models/volunteer");
 const getVolunteerProgramModel = require("../models/volunteerProgram");
+const { canReviewProgram } = require("./volunteerProgramController");
 const cloudinary = require("../utils/cloudinary");
 const { PDFDocument } = require("pdf-lib");
 const QRCode = require("qrcode");
@@ -8,54 +9,51 @@ const path = require("path");
 const { createCanvas, loadImage } = require("@napi-rs/canvas");
 const streamifier = require("streamifier");
 
-/* Adapté pour référencer VolunteerProgram (remplace Mission) — voir le
-   commentaire en tête de controllers/volunteerController.js pour la limite
-   de populate() cross-connection (VolunteerProgram vit sur global.formDB,
-   Volunteer sur la connexion par défaut) : les titres de programme sont
-   résolus manuellement, jamais via .populate("programs.programId").
+/* Refondu le 2026-08-19 (décision utilisateur) : raisonne désormais par
+   programId (comme le reste du chantier volontaires) plutôt que par titre
+   de programme, et l'autorisation passe par canReviewProgram
+   (volunteerProgramController.js — ADMIN toujours, EDITOR seulement si
+   affecté à CE programme) au lieu d'un simple roleMiddleware ADMIN/EDITOR
+   qui ne scopait à aucun programme précis. L'auto-service public
+   (downloadCertificate, AttestationForm.jsx) a été supprimé : chaque
+   volontaire a désormais son espace authentifié ("Mon espace" →
+   Dashboard.jsx, section "Mes attestations", qui lit déjà
+   profile.attestations via GET /api/volunteer-auth/me — voir
+   attachProgramTitles dans volunteerController.js, inchangé). Seule
+   verifyAttestation reste publique (scan du QR code sur l'attestation
+   papier/PDF). VolunteerProgram vit sur global.formDB, Volunteer sur la
+   connexion par défaut — pas de .populate() cross-connection possible,
+   résolution manuelle comme partout ailleurs dans ce chantier. */
 
-   `downloadCertificate` et `verifyAttestation` sont des points d'entrée
-   PUBLICS déjà consommés par AttestationForm.jsx et verify/[id].astro — la
-   FORME de leur réponse JSON (clés "missions"/"mission") est délibérément
-   conservée telle quelle pour ne pas devoir toucher ces deux pages dans ce
-   chantier ; seule la source des données change en interne
-   (VolunteerProgram au lieu de Mission). */
-
-/* -------------------- Récupérer les volontaires prêts pour attestation -------------------- */
+/* -------------------- Staff : volontaires éligibles + déjà générés pour un programme -------------------- */
 const fetchVolunteersForCertificate = async (req, res) => {
   try {
-    const { titre } = req.body;
-    if (!titre) return res.status(400).json({ message: "Titre de programme requis" });
-
+    const { programId } = req.params;
     const Program = getVolunteerProgramModel();
-    const program = await Program.findOne({ title: titre });
+    const program = await Program.findById(programId).select("title reviewerIds editorIds");
     if (!program) return res.status(404).json({ message: "Programme introuvable" });
+    if (!canReviewProgram(program, req.user)) {
+      return res.status(403).json({ message: "Vous n'êtes pas autorisé à gérer ce programme" });
+    }
 
-    let volunteers = await Volunteer.find({ "programs.programId": program._id }).lean();
+    const volunteers = await Volunteer.find({ "programs.programId": program._id }).lean();
 
-    // Filtrer : statut "Mission validée" pour ce programme et attestation non encore générée
-    volunteers = volunteers.filter(v =>
-      v.programs.some(p => p.programId.toString() === program._id.toString() && p.statut === "Mission validée") &&
-      !v.attestations?.some(a => a.programId.toString() === program._id.toString())
-    );
+    const eligible = [];
+    const alreadyGenerated = [];
+    volunteers.forEach((v) => {
+      const programData = v.programs.find((p) => p.programId.toString() === program._id.toString());
+      if (programData?.statut !== "Mission validée") return;
 
-    const response = volunteers.map(v => {
-      const programData = v.programs.find(p => p.programId.toString() === program._id.toString());
-      return {
-        _id: v._id,
-        nom: v.nom,
-        prenom: v.prenom,
-        email: v.email,
-        telephone: v.telephone,
-        missionStatus: programData?.statut || "Non disponible",
-      };
+      const existing = v.attestations?.find((a) => a.programId.toString() === program._id.toString());
+      const summary = { volunteerId: v._id, nom: v.nom, prenom: v.prenom, email: v.email, telephone: v.telephone };
+      if (existing?.fileUrl) {
+        alreadyGenerated.push({ ...summary, fileUrl: existing.fileUrl, uploadedAt: existing.uploadedAt });
+      } else {
+        eligible.push(summary);
+      }
     });
 
-    res.status(200).json({
-      mission: { _id: program._id, titre: program.title },
-      volunteers: response,
-      total: response.length,
-    });
+    res.status(200).json({ programTitle: program.title, eligible, alreadyGenerated });
   } catch (error) {
     console.error("❌ fetchVolunteersForCertificate erreur :", error);
     res.status(500).json({ message: error.message || "Erreur serveur" });
@@ -108,29 +106,25 @@ function fitNameText(ctx, text, maxWidth, maxHeight, fontFamily, initialSize) {
 
 const generateCertificate = async (req, res) => {
   try {
-    const { titre, email, mode } = req.body;
-    if (!titre)
-      return res.status(400).json({ message: "Titre de programme requis" });
+    const { programId } = req.params;
+    // volunteerIds optionnel (mêmes conventions que reactivateFinalReport,
+    // volunteerTaskController.js) : absent/vide = tous les éligibles.
+    const { volunteerIds } = req.body || {};
 
     const Program = getVolunteerProgramModel();
-    const program = await Program.findOne({ title: titre });
-    if (!program)
-      return res.status(404).json({ message: "Programme introuvable" });
-
-    let volunteers = [];
-    if (mode === "Tous les volontaires") {
-      volunteers = await Volunteer.find({
-        "programs.programId": program._id,
-      });
-    } else if (mode === "Un volontaire" && email) {
-      const v = await Volunteer.findOne({
-        email,
-        "programs.programId": program._id,
-      });
-      if (v) volunteers.push(v);
+    const program = await Program.findById(programId).select("title reviewerIds editorIds");
+    if (!program) return res.status(404).json({ message: "Programme introuvable" });
+    if (!canReviewProgram(program, req.user)) {
+      return res.status(403).json({ message: "Vous n'êtes pas autorisé à gérer ce programme" });
     }
 
-    // Filtrer : programmes validés et sans attestation
+    const volunteerQuery = { "programs.programId": program._id };
+    if (Array.isArray(volunteerIds) && volunteerIds.length > 0) {
+      volunteerQuery._id = { $in: volunteerIds };
+    }
+    let volunteers = await Volunteer.find(volunteerQuery);
+
+    // Filtrer : mission validée pour CE programme et pas déjà d'attestation.
     volunteers = volunteers.filter((v) => {
       const p = v.programs.find(
         (p) =>
@@ -144,7 +138,7 @@ const generateCertificate = async (req, res) => {
     });
 
     if (volunteers.length === 0)
-      return res.status(404).json({ message: "Aucun volontaire trouvé" });
+      return res.status(404).json({ message: "Aucun volontaire éligible trouvé" });
 
     let generatedCount = 0;
 
@@ -246,7 +240,7 @@ const generateCertificate = async (req, res) => {
       message: "Batch terminé",
       generated: generatedCount,
       total: volunteers.length,
-      mission: program.title,
+      programTitle: program.title,
     });
   } catch (error) {
     console.error("❌ generateCertificate erreur :", error);
@@ -255,123 +249,7 @@ const generateCertificate = async (req, res) => {
 };
 
 
-/* -------------------- Télécharger une attestation -------------------- */
-const downloadCertificate = async (req, res) => {
-  try {
-    const { email, nom, titre } = req.body;
-    const Program = getVolunteerProgramModel();
-
-    // 1️⃣ Vérifications de base
-    if (!email || !nom) {
-      return res.status(400).json({
-        message: "Email et nom sont requis",
-      });
-    }
-
-    // 2️⃣ Recherche du volontaire
-    const volunteer = await Volunteer.findOne({ email });
-
-    if (!volunteer) {
-      return res.status(404).json({
-        message:
-          "Vous n'êtes pas inscrit(e) dans la base des volontaires AMP BENIN ou vous avez mal saisi votre adresse email",
-      });
-    }
-
-    // 3️⃣ Vérification du nom de famille (ancien comportement)
-    if (volunteer.nom.toLowerCase() !== nom.toLowerCase()) {
-      return res.status(400).json({
-        message:
-          "Nom incorrect pour ce volontaire. Il s'agit uniquement de votre nom de famille",
-      });
-    }
-
-    // 4️⃣ Aucun programme
-    if (!volunteer.programs || volunteer.programs.length === 0) {
-      return res.status(404).json({
-        message: "Aucune mission n'est assignée à ce volontaire",
-      });
-    }
-
-    /* ===================== ÉTAPE 1 : RETOUR DES MISSIONS ===================== */
-    if (!titre) {
-      const programIds = volunteer.programs.map((p) => p.programId);
-      const programs = await Program.find({ _id: { $in: programIds } }).select("title");
-      const titleById = new Map(programs.map((p) => [String(p._id), p.title]));
-
-      const missionsList = volunteer.programs.map(p => ({
-        titre: titleById.get(String(p.programId)) || null,
-        statut: p.statut,
-      }));
-
-      return res.status(200).json({ missions: missionsList });
-    }
-
-    /* ===================== ÉTAPE 2 : TÉLÉCHARGEMENT ===================== */
-
-    // 5️⃣ Vérification programme
-    const program = await Program.findOne({ title: titre });
-    if (!program) {
-      return res.status(404).json({
-        message: "Mission sélectionnée introuvable",
-      });
-    }
-
-    // 6️⃣ Programme lié au volontaire
-    const programData = volunteer.programs.find(
-      p => p.programId.toString() === program._id.toString()
-    );
-
-    if (!programData) {
-      return res.status(403).json({
-        message: "Aucune mission valide pour ce volontaire",
-      });
-    }
-
-    // 7️⃣ Gestion des statuts (NOUVEAU MODEL, ANCIEN COMPORTEMENT)
-    if (programData.statut === "Non disponible") {
-      return res.status(403).json({
-        message:
-          "Vous n'avez pas renseigner le rapport de fin de mission ou vous n'y avez point participé",
-      });
-    }
-
-    if (programData.statut === "Refusé") {
-      return res.status(403).json({
-        message:
-          "Désolé, vous n'avez pas rempli les conditions de la mission pour télécharger votre attestation",
-      });
-    }
-
-    // 8️⃣ Vérification attestation
-    const cert = volunteer.attestations.find(
-      a => a.programId.toString() === program._id.toString()
-    );
-
-    if (!cert) {
-      return res.status(404).json({
-        message:
-          "Merci pour avoir achevé cette mission. Votre attestation sera disponible bientôt",
-      });
-    }
-
-    if (!cert.fileUrl) {
-      return res.status(500).json({
-        message: "Lien de l'attestation manquant",
-      });
-    }
-
-    // 9️⃣ Succès
-    return res.status(200).json({ url: cert.fileUrl });
-
-  } catch (error) {
-    console.error("❌ downloadCertificate erreur :", error);
-    return res.status(500).json({ message: "Erreur serveur" });
-  }
-};
-
-
-/* -------------------- Vérification d'une attestation via son ObjectId -------------------- */
+/* -------------------- Public : vérification d'une attestation via son ObjectId (scan QR) -------------------- */
 const verifyAttestation = async (req, res) => {
   try {
     const { id } = req.params;
@@ -394,6 +272,10 @@ const verifyAttestation = async (req, res) => {
       telephone: volunteer.telephone,
       mission: program.title,
       date: attestation.uploadedAt || volunteer.updatedAt,
+      // Ajouté le 2026-08-19 — jamais renvoyé avant, alors que
+      // VerifyAttestation.jsx attend data.fileUrl depuis toujours pour
+      // afficher le lien "Télécharger" (bug corrigé au passage).
+      fileUrl: attestation.fileUrl || null,
     });
   } catch (error) {
     console.error("❌ verifyAttestation erreur :", error);
@@ -404,6 +286,5 @@ const verifyAttestation = async (req, res) => {
 module.exports = {
   fetchVolunteersForCertificate,
   generateCertificate,
-  downloadCertificate,
   verifyAttestation,
 };
