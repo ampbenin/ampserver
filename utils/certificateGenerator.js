@@ -35,27 +35,337 @@ function escapeXml(value) {
     .replace(/"/g, "&quot;");
 }
 
-// Découpe en lignes tenant dans maxWidth — approximation simple (largeur de
-// caractère moyenne), suffisante pour une description courte sur un
-// certificat ; contrairement au ticket, pas de police embarquée ici pour
-// mesurer précisément (le texte est rendu par le moteur SVG du navigateur/
-// resvg au moment de la rasterisation, pas par un objet Font en mémoire).
-function wrapText(text, maxCharsPerLine, maxLines) {
-  const words = String(text || "").split(/\s+/).filter(Boolean);
-  const lines = [];
-  let current = "";
-  for (const word of words) {
-    const trial = current ? `${current} ${word}` : word;
-    if (trial.length > maxCharsPerLine && current) {
-      lines.push(current);
-      current = word;
-      if (lines.length === maxLines - 1) break;
-    } else {
-      current = trial;
-    }
+const DESCRIPTION_FONT_FAMILY = "Arial, sans-serif";
+
+// Mesure la largeur réelle (en px) d'un texte tel que rendu par CE moteur de
+// rasterisation — rendu isolé dans un SVG jetable puis recadré (sharp.trim())
+// à la boîte englobante du texte. Nécessaire car ni `word-spacing` ni
+// `textLength`/`lengthAdjust` (les deux essayés d'abord) ne sont respectés
+// ici : vérifié empiriquement (rendu strictement identique avec ou sans ces
+// attributs) — seule une mesure/positionnement basés sur de vrais glyphes
+// fonctionne de façon fiable.
+async function measureTextWidth(text, fontSize, fontFamily, fontWeight = "normal") {
+  if (!text) return 0;
+  const probeHeight = Math.ceil(fontSize * 1.6);
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="4000" height="${probeHeight}"><text x="0" y="${fontSize}" font-size="${fontSize}" font-family="${fontFamily}" font-weight="${fontWeight}">${escapeXml(text)}</text></svg>`;
+  const { info } = await sharp(Buffer.from(svg)).trim().toBuffer({ resolveWithObject: true });
+  return info.width;
+}
+
+const spaceWidthCache = new Map();
+async function getSpaceWidth(fontSize, bold) {
+  const key = `${fontSize}|${bold}`;
+  if (!spaceWidthCache.has(key)) {
+    const fw = bold ? "bold" : "normal";
+    const withSpace = await measureTextWidth("I I", fontSize, DESCRIPTION_FONT_FAMILY, fw);
+    const withoutSpace = await measureTextWidth("II", fontSize, DESCRIPTION_FONT_FAMILY, fw);
+    spaceWidthCache.set(key, Math.max(1, withSpace - withoutSpace));
   }
-  if (current) lines.push(current);
-  return lines.slice(0, maxLines);
+  return spaceWidthCache.get(key);
+}
+
+/* ---------- Éditeur riche (Description certificat, admin) — parsing ---------- */
+// Le champ "Description certificat" est désormais un éditeur riche côté
+// admin (gras, souligné, couleur, taille, alignement — voir
+// VolunteerProgramEditor.jsx) qui enregistre du HTML. Ce parseur ne gère
+// QU'un sous-ensemble volontairement restreint (les seules balises que cet
+// éditeur peut produire : <b>/<strong>, <u>, <span style="...">, <div>/<p>
+// pour les paragraphes, <br>) — pas un parseur HTML générique. Les valeurs
+// enregistrées AVANT cette fonctionnalité (texte brut, éventuellement avec
+// des \n) restent supportées via paragraphsFromPlainText ci-dessous.
+
+function decodeHtmlEntities(str) {
+  return str
+    .replace(/&nbsp;/gi, " ")
+    .replace(/&amp;/gi, "&")
+    .replace(/&lt;/gi, "<")
+    .replace(/&gt;/gi, ">")
+    .replace(/&quot;/gi, '"')
+    .replace(/&#39;/gi, "'");
+}
+
+function normalizeAlign(val) {
+  const v = String(val || "").toLowerCase();
+  if (v.includes("center")) return "center";
+  if (v.includes("right") || v === "end") return "right";
+  if (v.includes("justify")) return "justify";
+  return "left";
+}
+
+function parseInlineStyle(styleAttr) {
+  const style = {};
+  String(styleAttr || "")
+    .split(";")
+    .forEach((decl) => {
+      const [rawKey, ...rest] = decl.split(":");
+      const rawVal = rest.join(":");
+      if (!rawKey || !rawVal) return;
+      const key = rawKey.trim().toLowerCase();
+      const val = rawVal.trim();
+      if (key === "color") style.color = val;
+      if (key === "text-align") style.align = normalizeAlign(val);
+      if (key === "font-weight" && (val === "bold" || parseInt(val, 10) >= 600)) style.bold = true;
+      if (key === "text-decoration" && val.includes("underline")) style.underline = true;
+      if (key === "font-size") {
+        const m = val.match(/([\d.]+)px/);
+        if (m) style.fontSize = parseFloat(m[1]);
+      }
+    });
+  return style;
+}
+
+// Sépare le HTML en paragraphes de "mots stylés" : [{ align, words: [{text,
+// bold, underline, color, fontSize}] }, ...].
+function parseRichDescription(html) {
+  const paragraphs = [];
+  const blocks = String(html).split(/<\/(?:p|div)\s*>|<br\s*\/?>/i);
+
+  for (const rawBlock of blocks) {
+    const blockOpenMatch = rawBlock.match(/^\s*<(p|div)([^>]*)>/i);
+    let align = "left";
+    let content = rawBlock;
+    if (blockOpenMatch) {
+      const styleAttrMatch = blockOpenMatch[2].match(/style\s*=\s*"([^"]*)"/i);
+      if (styleAttrMatch) {
+        const style = parseInlineStyle(styleAttrMatch[1]);
+        if (style.align) align = style.align;
+      }
+      content = rawBlock.slice(blockOpenMatch[0].length);
+    }
+
+    const words = [];
+    const styleStack = [{ bold: false, underline: false, color: null, fontSize: null }];
+    const tagRe = /<(\/?)(\w+)([^>]*)>/g;
+    let lastIndex = 0;
+    let match;
+
+    const flushText = (text) => {
+      if (!text) return;
+      const current = styleStack[styleStack.length - 1];
+      const decoded = decodeHtmlEntities(text).replace(/\s+/g, " ");
+      decoded
+        .split(" ")
+        .filter(Boolean)
+        .forEach((w) => words.push({ text: w, ...current }));
+    };
+
+    while ((match = tagRe.exec(content)) !== null) {
+      const [full, closing, tagNameRaw, attrs] = match;
+      flushText(content.slice(lastIndex, match.index));
+      lastIndex = tagRe.lastIndex;
+      const tag = tagNameRaw.toLowerCase();
+
+      if (closing) {
+        if (["b", "strong", "u", "span", "font"].includes(tag) && styleStack.length > 1) styleStack.pop();
+        continue;
+      }
+      if (full.endsWith("/>") && tag !== "br") continue; // balise auto-fermante non gérée (image collée...)
+
+      const top = styleStack[styleStack.length - 1];
+      if (tag === "b" || tag === "strong") {
+        styleStack.push({ ...top, bold: true });
+      } else if (tag === "u") {
+        styleStack.push({ ...top, underline: true });
+      } else if (tag === "span" || tag === "font") {
+        const styleAttrMatch = attrs.match(/style\s*=\s*"([^"]*)"/i);
+        const s = styleAttrMatch ? parseInlineStyle(styleAttrMatch[1]) : {};
+        styleStack.push({
+          bold: s.bold || top.bold,
+          underline: s.underline || top.underline,
+          color: s.color || top.color,
+          fontSize: s.fontSize || top.fontSize,
+        });
+      }
+    }
+    flushText(content.slice(lastIndex));
+
+    if (words.length) paragraphs.push({ align, words });
+  }
+
+  return paragraphs;
+}
+
+// Repli pour les valeurs enregistrées avant l'éditeur riche : texte brut,
+// paragraphes séparés par des retours à la ligne — même comportement
+// qu'avant (justifié, sans style particulier).
+function paragraphsFromPlainText(text) {
+  return String(text)
+    .split(/\n+/)
+    .map((p) => p.trim())
+    .filter(Boolean)
+    .map((p) => ({
+      align: "justify",
+      words: p
+        .split(/\s+/)
+        .filter(Boolean)
+        .map((w) => ({ text: w, bold: false, underline: false, color: null, fontSize: null })),
+    }));
+}
+
+function hasVisibleText(raw) {
+  return String(raw || "")
+    .replace(/<[^>]+>/g, " ")
+    .trim().length > 0;
+}
+
+/* ---------- Éditeur riche — mise en page (wrap + justification) ---------- */
+
+// Découpe les mots d'UN paragraphe en lignes tenant dans zone.width, à
+// l'échelle `scale` (utilisée pour réduire proportionnellement toutes les
+// tailles — y compris les tailles personnalisées par mot — si le texte ne
+// tient pas dans la hauteur disponible).
+async function wrapParagraphWords(words, zone, scale) {
+  const baseFontSize = zone.fontSize || 32;
+  const lines = [];
+  let current = [];
+  let currentWidth = 0;
+  let currentMaxFont = 0;
+
+  for (const word of words) {
+    const fontSize = (word.fontSize || baseFontSize) * scale;
+    const bold = !!word.bold;
+    const width = await measureTextWidth(word.text, fontSize, DESCRIPTION_FONT_FAMILY, bold ? "bold" : "normal");
+    const spaceW = await getSpaceWidth(fontSize, bold);
+    const prospectiveGap = current.length ? spaceW : 0;
+
+    if (currentWidth + prospectiveGap + width > zone.width && current.length) {
+      lines.push({ words: current, maxFont: currentMaxFont });
+      current = [];
+      currentWidth = 0;
+      currentMaxFont = 0;
+    }
+
+    const gap = current.length ? spaceW : 0;
+    current.push({
+      text: word.text,
+      bold,
+      underline: !!word.underline,
+      color: word.color || zone.color || "#000000",
+      fontSize,
+      width,
+    });
+    currentWidth += gap + width;
+    currentMaxFont = Math.max(currentMaxFont, fontSize);
+  }
+  if (current.length) lines.push({ words: current, maxFont: currentMaxFont });
+  return lines;
+}
+
+// Place toutes les lignes de tous les paragraphes verticalement, avec un
+// petit interligne SUPPLÉMENTAIRE entre paragraphes (demande explicite) en
+// plus de l'interligne normal entre lignes d'un même paragraphe. Réduit
+// `scale` par itérations si le texte ne tient pas dans zone.height, au lieu
+// de tronquer — c'est ce qui garantit que plusieurs paragraphes restent
+// tous visibles.
+async function layoutRichDescription(paragraphs, zone) {
+  const baseFontSize = zone.fontSize || 32;
+
+  async function attempt(scale) {
+    const paragraphGap = baseFontSize * scale * 0.55;
+    const lines = [];
+    let cursorY = zone.y;
+
+    for (let p = 0; p < paragraphs.length; p++) {
+      const paraLines = await wrapParagraphWords(paragraphs[p].words, zone, scale);
+      paraLines.forEach((line, idx) => {
+        const baseline = cursorY + line.maxFont;
+        lines.push({
+          align: paragraphs[p].align,
+          words: line.words,
+          y: baseline,
+          isParagraphEnd: idx === paraLines.length - 1,
+        });
+        cursorY += line.maxFont * 1.3;
+      });
+      if (p < paragraphs.length - 1) cursorY += paragraphGap;
+    }
+
+    return { lines, totalHeight: cursorY - zone.y };
+  }
+
+  let scale = 1;
+  let result = await attempt(scale);
+  for (let i = 0; i < 5 && result.totalHeight > zone.height && scale > 0.35; i++) {
+    const ratio = zone.height / result.totalHeight;
+    scale = Math.max(0.35, scale * ratio * 0.95);
+    result = await attempt(scale);
+  }
+  return result;
+}
+
+function wordTspanAttrs(word) {
+  return [
+    `font-size="${word.fontSize.toFixed(1)}"`,
+    `font-weight="${word.bold ? "bold" : "normal"}"`,
+    `fill="${word.color}"`,
+    word.underline ? `text-decoration="underline"` : null,
+  ]
+    .filter(Boolean)
+    .join(" ");
+}
+
+// Rend les lignes déjà positionnées : justifié = un <tspan x=".."> par mot
+// (seule technique fiable ici, voir measureTextWidth) ; gauche/centre/droite
+// = flux naturel dans un seul <text> ancré (text-anchor), plus simple et
+// suffisant puisqu'aucun étirement n'est nécessaire dans ces cas.
+function buildRichDescriptionMarkup(layout, zone) {
+  const parts = [];
+
+  for (const line of layout.lines) {
+    if (!line.words.length) continue;
+    const isJustify = line.align === "justify" && !line.isParagraphEnd && line.words.length > 1;
+
+    if (isJustify) {
+      const totalWordsWidth = line.words.reduce((s, w) => s + w.width, 0);
+      const gapWidth = Math.max(4, (zone.width - totalWordsWidth) / (line.words.length - 1));
+      let cursorX = zone.x;
+      const tspans = line.words.map((w) => {
+        const markup = `<tspan x="${cursorX.toFixed(1)}" y="${line.y.toFixed(1)}" ${wordTspanAttrs(w)}>${escapeXml(w.text)}</tspan>`;
+        cursorX += w.width + gapWidth;
+        return markup;
+      });
+      parts.push(`<text>${tspans.join("")}</text>`);
+      continue;
+    }
+
+    let anchorX = zone.x;
+    let textAnchor = "start";
+    if (line.align === "center") {
+      anchorX = zone.x + zone.width / 2;
+      textAnchor = "middle";
+    } else if (line.align === "right") {
+      anchorX = zone.x + zone.width;
+      textAnchor = "end";
+    }
+
+    const tspans = line.words.map((w, i) => {
+      const prefix = i > 0 ? " " : "";
+      return `<tspan ${wordTspanAttrs(w)}>${escapeXml(prefix + w.text)}</tspan>`;
+    });
+    // xml:space="preserve" est INDISPENSABLE ici : par défaut, ce moteur de
+    // rendu rogne les espaces en début/fin de contenu de CHAQUE <tspan>
+    // (vérifié empiriquement) — sans ça, l'espace ajouté en préfixe de
+    // chaque mot (nécessaire pour changer de style par mot) disparaît et
+    // tous les mots de la ligne se retrouvent collés.
+    parts.push(`<text x="${anchorX.toFixed(1)}" y="${line.y.toFixed(1)}" text-anchor="${textAnchor}" xml:space="preserve">${tspans.join("")}</text>`);
+  }
+
+  return parts.join("\n");
+}
+
+// Point d'entrée de la zone "description" — utilisé par les deux chemins
+// (SVG absolu / raster local à 0,0, voir zone passée par l'appelant).
+// Retourne une chaîne vide si le champ est vide : le certificat n'affiche
+// alors rien dans cette zone (pas de texte de repli).
+async function renderDescriptionZone(rawValue, zone) {
+  if (!hasVisibleText(rawValue)) return "";
+
+  const isHtml = /<[a-z][\s\S]*>/i.test(String(rawValue));
+  const paragraphs = isHtml ? parseRichDescription(rawValue) : paragraphsFromPlainText(rawValue);
+  if (!paragraphs.length) return "";
+
+  const layout = await layoutRichDescription(paragraphs, zone);
+  return buildRichDescriptionMarkup(layout, zone);
 }
 
 // Construit les valeurs texte disponibles pour les zones connues.
@@ -65,26 +375,36 @@ function buildZoneTextValues({ volunteerName, description }) {
 
 /* -------------------- Chemin SVG (injection XML) -------------------- */
 
-function buildTextElement(zone, value) {
+// Police "élégante" pour le nom — empattement (serif) + gras, pour ressortir
+// visuellement du reste du texte (demande explicite). Repli sur des polices
+// serif largement disponibles côté serveur (le rendu SVG n'a pas accès aux
+// polices custom du poste de conception) : si "Playfair Display" n'est pas
+// installée sur le serveur, le moteur de rendu retombe sur Georgia puis sur
+// le serif générique du système — reste élégant dans tous les cas.
+const NOM_FONT_FAMILY = "'Playfair Display', Georgia, 'Times New Roman', serif";
+const NOM_DEFAULT_COLOR = "#1B4332"; // vert sombre — identité visuelle AMP Bénin
+
+async function buildTextElement(zone, value) {
   const fontSize = zone.fontSize || 24;
   const color = zone.color || "#000000";
-  // Description : texte potentiellement plus long, découpé sur plusieurs
-  // lignes (largeur approximée à 1.8 caractère par unité de fontSize dans
-  // la zone). Nom : toujours une seule ligne.
+
+  // Description : HTML riche (gras/souligné/couleur/taille/alignement,
+  // saisis depuis l'admin) ou texte brut legacy, multi-paragraphes, avec
+  // interligne supplémentaire entre paragraphes et taille auto-réduite si
+  // besoin pour que TOUT le texte tienne (voir renderDescriptionZone) — vide
+  // si le champ est vide, aucun texte de repli.
   if (zone.nom === "description") {
-    const approxCharsPerLine = Math.max(6, Math.floor(zone.width / (fontSize * 0.55)));
-    const approxMaxLines = Math.max(1, Math.floor(zone.height / (fontSize * 1.3)));
-    const lines = wrapText(value, approxCharsPerLine, approxMaxLines);
-    const lineHeight = fontSize * 1.3;
-    return lines
-      .map((line, i) => {
-        const y = zone.y + fontSize + i * lineHeight;
-        return `<text x="${zone.x + zone.width / 2}" y="${y}" font-size="${fontSize}" fill="${color}" font-family="Arial, sans-serif" text-anchor="middle">${escapeXml(line)}</text>`;
-      })
-      .join("\n");
+    return renderDescriptionZone(value, zone);
   }
+
+  // "nom" : gras, police élégante, vert sombre par défaut (surchargeable via
+  // zone.color). Toute autre zone texte simple garde le rendu neutre.
+  const isNom = zone.nom === "nom";
+  const textColor = isNom ? zone.color || NOM_DEFAULT_COLOR : color;
+  const fontFamily = isNom ? NOM_FONT_FAMILY : "Arial, sans-serif";
+  const fontWeight = isNom ? "bold" : "normal";
   const textY = zone.y + zone.height / 2 + fontSize * 0.35;
-  return `<text x="${zone.x + zone.width / 2}" y="${textY}" font-size="${fontSize}" fill="${color}" font-family="Arial, sans-serif" text-anchor="middle">${escapeXml(value)}</text>`;
+  return `<text x="${zone.x + zone.width / 2}" y="${textY}" font-size="${fontSize}" fill="${textColor}" font-family="${fontFamily}" font-weight="${fontWeight}" text-anchor="middle">${escapeXml(value)}</text>`;
 }
 
 async function buildZoneElementsSvg(zones, qrDataUri, textValues) {
@@ -96,8 +416,11 @@ async function buildZoneElementsSvg(zones, qrDataUri, textValues) {
       );
       continue;
     }
+    // Description vide (champ non rempli côté admin) : on ne dessine rien
+    // du tout dans cette zone, pas de texte de repli.
+    if (zone.nom === "description" && !hasVisibleText(textValues.description)) continue;
     if (zone.nom in textValues) {
-      elements.push(buildTextElement(zone, textValues[zone.nom]));
+      elements.push(await buildTextElement(zone, textValues[zone.nom]));
     }
   }
   return elements.join("\n");
@@ -141,16 +464,16 @@ async function buildTextZonePng(value, zone) {
 
   let svgContent;
   if (zone.nom === "description") {
-    const approxCharsPerLine = Math.max(6, Math.floor(width / (fontSize * 0.55)));
-    const approxMaxLines = Math.max(1, Math.floor(height / (fontSize * 1.3)));
-    const lines = wrapText(value, approxCharsPerLine, approxMaxLines);
-    const lineHeight = fontSize * 1.3;
-    svgContent = lines
-      .map((line, i) => `<text x="${width / 2}" y="${fontSize + i * lineHeight}" font-size="${fontSize}" fill="${color}" font-family="Arial, sans-serif" text-anchor="middle">${escapeXml(line)}</text>`)
-      .join("\n");
+    // Origine (0,0) locale à ce calque, contrairement au chemin SVG (qui
+    // travaille dans les coordonnées absolues du visuel).
+    svgContent = await renderDescriptionZone(value, { x: 0, y: 0, width, height, fontSize: zone.fontSize, color: zone.color });
   } else {
+    const isNom = zone.nom === "nom";
+    const textColor = isNom ? zone.color || NOM_DEFAULT_COLOR : color;
+    const fontFamily = isNom ? NOM_FONT_FAMILY : "Arial, sans-serif";
+    const fontWeight = isNom ? "bold" : "normal";
     const textY = height / 2 + fontSize * 0.35;
-    svgContent = `<text x="${width / 2}" y="${textY}" font-size="${fontSize}" fill="${color}" font-family="Arial, sans-serif" text-anchor="middle">${escapeXml(value)}</text>`;
+    svgContent = `<text x="${width / 2}" y="${textY}" font-size="${fontSize}" fill="${textColor}" font-family="${fontFamily}" font-weight="${fontWeight}" text-anchor="middle">${escapeXml(value)}</text>`;
   }
 
   const snippet = `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}">${svgContent}</svg>`;
@@ -174,6 +497,7 @@ async function generateFromRasterTemplate(templateUrl, zones, qrDataUri, textVal
       composites.push({ input: qrResized, left, top });
       continue;
     }
+    if (zone.nom === "description" && !hasVisibleText(textValues.description)) continue;
     if (zone.nom in textValues) {
       const textPng = await buildTextZonePng(textValues[zone.nom], zone);
       composites.push({ input: textPng, left, top });

@@ -110,17 +110,21 @@ const uploadCertificateTemplate = async (req, res) => {
     const { programId } = req.params;
     const Program = getVolunteerProgramModel();
     const program = await Program.findById(programId).select(
-      "title reviewerIds editorIds certificateTemplatePublicId certificateTemplateFormat"
+      "title reviewerIds editorIds certificateTemplateUrl certificateTemplatePublicId certificateTemplateFormat"
     );
     if (!program) return res.status(404).json({ message: "Programme introuvable" });
     if (!canReviewProgram(program, req.user)) {
       return res.status(403).json({ message: "Vous n'êtes pas autorisé à gérer ce programme" });
     }
 
-    if (!req.file) {
+    // Le fichier n'est requis QUE s'il n'y a pas encore de visuel enregistré
+    // — une fois un visuel en place, on doit pouvoir mettre à jour juste les
+    // zones et/ou la description (ex : ajuster le texte) sans redemander de
+    // réuploader l'image à chaque fois.
+    if (!req.file && !program.certificateTemplateUrl) {
       return res.status(400).json({ message: "Le fichier du visuel (SVG, PNG ou JPG) est requis" });
     }
-    if (!ALLOWED_TEMPLATE_MIMETYPES.includes(req.file.mimetype)) {
+    if (req.file && !ALLOWED_TEMPLATE_MIMETYPES.includes(req.file.mimetype)) {
       return res.status(400).json({ message: "Format de fichier non supporté (SVG, PNG ou JPG uniquement)" });
     }
 
@@ -131,22 +135,25 @@ const uploadCertificateTemplate = async (req, res) => {
       return res.status(400).json({ message: e.message });
     }
 
-    const oldPublicId = program.certificateTemplatePublicId;
-    const oldFormat = program.certificateTemplateFormat;
+    if (req.file) {
+      const oldPublicId = program.certificateTemplatePublicId;
+      const oldFormat = program.certificateTemplateFormat;
 
-    const uploaded = await uploadTemplateBuffer(req.file.buffer, req.file.mimetype);
+      const uploaded = await uploadTemplateBuffer(req.file.buffer, req.file.mimetype);
 
-    program.certificateTemplateUrl = uploaded.secure_url;
-    program.certificateTemplatePublicId = uploaded.public_id;
-    program.certificateTemplateFormat = templateFormatFor(req.file.mimetype);
+      program.certificateTemplateUrl = uploaded.secure_url;
+      program.certificateTemplatePublicId = uploaded.public_id;
+      program.certificateTemplateFormat = templateFormatFor(req.file.mimetype);
+
+      // Best-effort : ne bloque jamais la mise à jour si le nettoyage échoue.
+      if (oldPublicId) destroyTemplateAsset(oldPublicId, oldFormat);
+    }
+
     program.certificateZones = zones;
     if (req.body.certificateDescription !== undefined) {
       program.certificateDescription = req.body.certificateDescription;
     }
     await program.save();
-
-    // Best-effort : ne bloque jamais la mise à jour si le nettoyage échoue.
-    if (oldPublicId) destroyTemplateAsset(oldPublicId, oldFormat);
 
     res.json({
       message: "Visuel de certificat mis à jour",
