@@ -29,4 +29,12 @@ router.post("/programs/:programId/generate", authMiddleware, generateCertificate
 // télécharge désormais depuis son espace authentifié, "Mon espace").
 router.get("/verify/:id", verifyAttestation);
 
+// 🔧 Diagnostic temporaire (2026-09-10) — à retirer une fois le souci de
+// déploiement Railway confirmé/résolu. Public, pas d'info sensible :
+// permet de vérifier en un clic (simple visite d'URL, sans console) que le
+// déploiement en ligne correspond bien à ce commit.
+router.get("/_diag", (req, res) => {
+  res.json({ ok: true, marker: "certif-template-v1", deployedAt: "2026-09-10T13:40Z" });
+});
+
 module.exports = router;
