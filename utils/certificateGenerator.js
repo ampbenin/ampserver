@@ -533,7 +533,10 @@ async function buildTextElement(zone, value) {
   const textColor = isNom ? zone.color || NOM_DEFAULT_COLOR : color;
   const fontFamily = isNom ? NOM_FONT_FAMILY : DESCRIPTION_FONT_FAMILY;
   const fontWeight = isNom ? "bold" : "normal";
-  const textY = zone.y + zone.height / 2 + fontSize * 0.35;
+  // "nom" : aligné en BAS du cadre (demande explicite, 2026-09-10) — pas
+  // centré verticalement. `fontSize * 0.25` de marge pour laisser la place
+  // aux jambages (g, j, p...) sans qu'ils dépassent le bas du cadre.
+  const textY = isNom ? zone.y + zone.height - fontSize * 0.25 : zone.y + zone.height / 2 + fontSize * 0.35;
   return `<text x="${zone.x + zone.width / 2}" y="${textY}" font-size="${fontSize}" fill="${textColor}" font-family="${fontFamily}" font-weight="${fontWeight}" text-anchor="middle">${escapeXml(value)}</text>`;
 }
 
@@ -611,7 +614,7 @@ async function buildTextZonePng(value, zone) {
     const textColor = isNom ? zone.color || NOM_DEFAULT_COLOR : color;
     const fontFamily = isNom ? NOM_FONT_FAMILY : DESCRIPTION_FONT_FAMILY;
     const fontWeight = isNom ? "bold" : "normal";
-    const textY = height / 2 + fontSize * 0.35;
+    const textY = isNom ? height - fontSize * 0.25 : height / 2 + fontSize * 0.35;
     svgContent = `<text x="${width / 2}" y="${textY}" font-size="${fontSize}" fill="${textColor}" font-family="${fontFamily}" font-weight="${fontWeight}" text-anchor="middle">${escapeXml(value)}</text>`;
   }
 
