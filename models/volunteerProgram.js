@@ -14,6 +14,23 @@
 const mongoose = require("mongoose");
 const ApplicationFieldSchema = require("./shared/applicationFieldSchema");
 
+// Une zone positionnée sur le visuel de certificat (QR code, nom du
+// volontaire, ou description) — même schéma que les "zones" du système de
+// tickets côté server-miss-culture-benin (source d'inspiration de ce
+// système, voir CertificateEditor.jsx / certificateGenerator.js).
+const CertificateZoneSchema = new mongoose.Schema(
+  {
+    nom: { type: String, required: true, trim: true }, // "qr" | "nom" | "description"
+    x: { type: Number, required: true },
+    y: { type: Number, required: true },
+    width: { type: Number, required: true },
+    height: { type: Number, required: true },
+    fontSize: { type: Number, default: 24 },
+    color: { type: String, default: "#000000" },
+  },
+  { _id: false }
+);
+
 const VolunteerProgramSchema = new mongoose.Schema(
   {
     title: { type: String, required: true, trim: true },
@@ -170,6 +187,33 @@ const VolunteerProgramSchema = new mongoose.Schema(
     // d'un partenaire suivant CE programme + sur chaque page du rapport
     // PDF de CE programme — jamais mélangée avec un autre programme.
     partnersBarImageUrl: { type: String, default: null },
+
+    // ─── Certificat de fin de mission — visuel propre à CE programme ───
+    // Remplace l'ancien système (fond dessiné par code, identique pour
+    // tous les programmes, voir historique de certificateController.js) :
+    // chaque programme fournit désormais son propre visuel (SVG/PNG/JPG),
+    // sur lequel QR code, nom du volontaire et description sont superposés
+    // aux positions définies par certificateZones — même principe que les
+    // "types de tickets" côté server-miss-culture-benin (visuel + zones
+    // positionnables), voir utils/certificateGenerator.js.
+    // Obligatoire pour générer un certificat (pas de repli automatique) :
+    // certificateController.js#generateCertificate refuse tant qu'il est
+    // absent.
+    certificateTemplateUrl: { type: String, default: null },
+    certificateTemplatePublicId: { type: String, default: null },
+    // "svg" : le QR/texte sont injectés comme balises XML dans le SVG puis
+    // le tout est rasterisé. "raster" (PNG/JPG) : QR/texte sont superposés
+    // comme calques via sharp().composite() (pas de structure XML dans un
+    // raster). Voir certificateGenerator.js pour le détail des deux chemins.
+    certificateTemplateFormat: { type: String, enum: ["svg", "raster"], default: null },
+    certificateZones: { type: [CertificateZoneSchema], default: [] },
+    // Texte dédié au certificat (zone "description") — volontairement
+    // DISTINCT du champ `description` ci-dessus (qui reste le texte public
+    // du programme, affiché sur sa page de présentation) : celui-ci est
+    // pensé spécifiquement pour tenir sur le certificat, souvent plus
+    // court/formel (ex: "pour sa participation exemplaire et son
+    // engagement remarquable dans le cadre du programme").
+    certificateDescription: { type: String, default: "" },
   },
   { timestamps: true }
 );
