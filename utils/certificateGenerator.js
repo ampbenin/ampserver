@@ -139,14 +139,27 @@ function parseRichDescription(html) {
     let lastIndex = 0;
     let match;
 
+    // `noSpaceBefore` : un mot issu d'un <b>/<span>/<font> est un nœud texte
+    // À PART de la ponctuation ou du mot qui l'entoure dans le HTML (ex :
+    // "<b>MyCountry229</b>, en qualité..." ou "projet <b>MyCountry229</b>")
+    // — chaque morceau de texte entre deux balises est retokenisé
+    // indépendamment, donc il faut se souvenir SOI-MÊME, d'un flush à
+    // l'autre, si le morceau précédent se terminait par un espace (sinon on
+    // perd l'info "collé sans espace" ET on en invente un qui n'existe pas :
+    // les deux bugs se sont produits ici, d'où ce suivi explicite plutôt
+    // qu'un simple regard sur le début du morceau courant).
+    let lastCharWasSpace = true; // vrai avant le tout 1er mot du paragraphe
     const flushText = (text) => {
       if (!text) return;
       const current = styleStack[styleStack.length - 1];
-      const decoded = decodeHtmlEntities(text).replace(/\s+/g, " ");
-      decoded
-        .split(" ")
-        .filter(Boolean)
-        .forEach((w) => words.push({ text: w, ...current }));
+      const collapsed = decodeHtmlEntities(text).replace(/\s+/g, " ");
+      const hasLeadingSpace = /^\s/.test(collapsed) || lastCharWasSpace;
+      const parts = collapsed.split(" ").filter(Boolean);
+      parts.forEach((w, idx) => {
+        const noSpaceBefore = idx === 0 ? !hasLeadingSpace : false;
+        words.push({ text: w, ...current, noSpaceBefore });
+      });
+      lastCharWasSpace = parts.length ? /\s$/.test(collapsed) : true;
     };
 
     while ((match = tagRe.exec(content)) !== null) {
@@ -169,6 +182,15 @@ function parseRichDescription(html) {
       } else if (tag === "span" || tag === "font") {
         const styleAttrMatch = attrs.match(/style\s*=\s*"([^"]*)"/i);
         const s = styleAttrMatch ? parseInlineStyle(styleAttrMatch[1]) : {};
+        // <font color="..."> (attribut, pas style=) — forme produite par un
+        // collage depuis Word/Google Docs plutôt que par notre barre
+        // d'outils (qui génère du <span style="color:...">), mais tout
+        // aussi valide à supporter puisque le contentEditable accepte le
+        // collage de HTML externe.
+        if (!s.color) {
+          const colorAttrMatch = attrs.match(/\bcolor\s*=\s*"([^"]*)"/i);
+          if (colorAttrMatch) s.color = colorAttrMatch[1];
+        }
         styleStack.push({
           bold: s.bold || top.bold,
           underline: s.underline || top.underline,
@@ -226,7 +248,11 @@ async function wrapParagraphWords(words, zone, scale) {
     const bold = !!word.bold;
     const width = await measureTextWidth(word.text, fontSize, DESCRIPTION_FONT_FAMILY, bold ? "bold" : "normal");
     const spaceW = await getSpaceWidth(fontSize, bold);
-    const prospectiveGap = current.length ? spaceW : 0;
+    // Un mot "collé" (ponctuation juste après un <b>/<span>, sans espace
+    // dans le HTML source) n'a de sens que s'il suit un mot sur la MÊME
+    // ligne — en tout début de ligne (current vide), c'est un mot normal.
+    const glued = word.noSpaceBefore && current.length > 0;
+    const prospectiveGap = current.length && !glued ? spaceW : 0;
 
     if (currentWidth + prospectiveGap + width > zone.width && current.length) {
       lines.push({ words: current, maxFont: currentMaxFont });
@@ -235,7 +261,7 @@ async function wrapParagraphWords(words, zone, scale) {
       currentMaxFont = 0;
     }
 
-    const gap = current.length ? spaceW : 0;
+    const gap = current.length && !glued ? spaceW : 0;
     current.push({
       text: word.text,
       bold,
@@ -243,6 +269,7 @@ async function wrapParagraphWords(words, zone, scale) {
       color: word.color || zone.color || "#000000",
       fontSize,
       width,
+      glued,
     });
     currentWidth += gap + width;
     currentMaxFont = Math.max(currentMaxFont, fontSize);
@@ -316,12 +343,16 @@ function buildRichDescriptionMarkup(layout, zone) {
     const isJustify = line.align === "justify" && !line.isParagraphEnd && line.words.length > 1;
 
     if (isJustify) {
+      // Les transitions "collées" (ponctuation sans espace d'origine, voir
+      // noSpaceBefore) ne comptent ni dans la largeur à étirer ni dans le
+      // nombre d'espaces disponibles pour la justification.
       const totalWordsWidth = line.words.reduce((s, w) => s + w.width, 0);
-      const gapWidth = Math.max(4, (zone.width - totalWordsWidth) / (line.words.length - 1));
+      const realGaps = line.words.filter((w, i) => i > 0 && !w.glued).length;
+      const gapWidth = realGaps > 0 ? Math.max(4, (zone.width - totalWordsWidth) / realGaps) : 0;
       let cursorX = zone.x;
-      const tspans = line.words.map((w) => {
+      const tspans = line.words.map((w, i) => {
         const markup = `<tspan x="${cursorX.toFixed(1)}" y="${line.y.toFixed(1)}" ${wordTspanAttrs(w)}>${escapeXml(w.text)}</tspan>`;
-        cursorX += w.width + gapWidth;
+        cursorX += w.width + (i < line.words.length - 1 && !line.words[i + 1].glued ? gapWidth : 0);
         return markup;
       });
       parts.push(`<text>${tspans.join("")}</text>`);
@@ -339,7 +370,7 @@ function buildRichDescriptionMarkup(layout, zone) {
     }
 
     const tspans = line.words.map((w, i) => {
-      const prefix = i > 0 ? " " : "";
+      const prefix = i > 0 && !w.glued ? " " : "";
       return `<tspan ${wordTspanAttrs(w)}>${escapeXml(prefix + w.text)}</tspan>`;
     });
     // xml:space="preserve" est INDISPENSABLE ici : par défaut, ce moteur de
