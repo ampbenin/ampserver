@@ -17,9 +17,54 @@
  * de l'embarquer dans le PDF final (pdf-lib), le certificat restant un vrai
  * document PDF imprimable malgré ce nouveau mode de génération du visuel.
  */
-const sharp = require("sharp");
 const fs = require("fs");
 const path = require("path");
+const os = require("os");
+
+/* ---------- Bootstrap fontconfig (CRITIQUE — voir incident 2026-09-10, épisode 2) ----------
+ * Logs de déploiement Railway : "Fontconfig error: Cannot load default
+ * config file: No such file: (null)" — le conteneur n'a AUCUN fontconfig
+ * installé (pas de /etc/fonts/fonts.conf ni rien d'équivalent). Or
+ * librsvg (utilisé par sharp pour rasteriser du SVG) route TOUJOURS le
+ * texte via Pango/fontconfig pour résoudre les polices — y compris une
+ * police embarquée en @font-face dans le SVG (enregistrée dynamiquement
+ * dans le fontconfig actif au moment du rendu). Sans fichier de config
+ * fontconfig valide, fontconfig ne s'initialise pas du tout et AUCUN
+ * texte ne peut être dessiné, quelle que soit la police — d'où le
+ * précédent correctif (polices embarquées) resté sans effet une fois
+ * réellement déployé.
+ * Fix : générer nous-mêmes un fonts.conf minimal (déclarant juste
+ * assets/fonts/ comme source, en secours) et le déclarer via
+ * FONTCONFIG_FILE — AVANT de charger sharp, pour que fontconfig
+ * s'initialise correctement dès le premier rendu de texte. Ne touche à
+ * rien si une configuration valide existe déjà (ex : en local, où
+ * Windows/une vraie install Linux fournit son propre fontconfig).
+ */
+function ensureFontconfig() {
+  if (process.env.FONTCONFIG_FILE) return; // déjà positionné (ex : par l'environnement Railway lui-même)
+  try {
+    const fontsDir = path.join(__dirname, "..", "assets", "fonts");
+    const cacheDir = path.join(os.tmpdir(), "amp-fontconfig-cache");
+    fs.mkdirSync(cacheDir, { recursive: true });
+    const confPath = path.join(os.tmpdir(), "amp-fonts.conf");
+    const conf = `<?xml version="1.0"?>
+<!DOCTYPE fontconfig SYSTEM "fonts.dtd">
+<fontconfig>
+  <dir>${fontsDir}</dir>
+  <cachedir>${cacheDir}</cachedir>
+</fontconfig>
+`;
+    fs.writeFileSync(confPath, conf);
+    process.env.FONTCONFIG_FILE = confPath;
+  } catch (err) {
+    // Best-effort : si l'écriture échoue (permissions...), on retombe sur
+    // le comportement par défaut plutôt que de faire planter tout le module.
+    console.error("⚠️ ensureFontconfig() a échoué :", err.message);
+  }
+}
+ensureFontconfig();
+
+const sharp = require("sharp");
 
 // fetch natif (Node 18+, disponible ici) plutôt qu'ajouter axios comme
 // nouvelle dépendance — ce backend ne l'a pas contrairement à celui des votes.
