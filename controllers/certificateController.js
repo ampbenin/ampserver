@@ -195,10 +195,28 @@ async function renderCertificatePdf({ program, volunteerName, description, qrUrl
   return pdfDoc.save();
 }
 
-const uploadFromBuffer = (buffer, folder) => {
+// Nom de fichier lisible pour le PDF téléchargé — demande explicite :
+// "<Prénom Nom> <10 premières lettres du titre de la mission> AMP BENIN.pdf"
+// (au lieu du nom aléatoire généré par Cloudinary, sans extension). Testé en
+// direct sur ce compte Cloudinary : pour un upload "raw", c'est le public_id
+// LUI-MÊME qui doit porter l'extension (le paramètre `format` séparé n'a
+// aucun effet sur ce resource_type) — d'où le ".pdf" collé ici plutôt que
+// passé en option.
+function sanitizeForFilename(str) {
+  return String(str || "")
+    .replace(/[\/\\?%*:|"<>]/g, "")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+function buildAttestationFilename(volunteerName, programTitle) {
+  const missionPrefix = sanitizeForFilename(programTitle).slice(0, 10).trim();
+  return `${sanitizeForFilename(volunteerName)} ${missionPrefix} AMP BENIN.pdf`;
+}
+
+const uploadFromBuffer = (buffer, folder, publicId) => {
   return new Promise((resolve, reject) => {
     const uploadStream = cloudinary.uploader.upload_stream(
-      { folder, resource_type: "raw" },
+      { folder, resource_type: "raw", public_id: publicId },
       (error, result) => {
         if (error) return reject(error);
         resolve(result);
@@ -273,9 +291,15 @@ const generateCertificate = async (req, res) => {
         qrUrl: `${FRONTEND_BASE}/verify/${attestationId}`,
       });
 
-      const uploadedFile = await uploadFromBuffer(Buffer.from(pdfBytes), "attestations");
+      // Dossier nommé par l'ID de l'attestation : garantit l'unicité côté
+      // Cloudinary (deux volontaires homonymes sur la même mission
+      // n'écrasent pas le fichier l'un de l'autre) SANS polluer le nom de
+      // fichier visible, qui reste exactement "<nom> <mission> AMP BENIN.pdf".
+      const filename = buildAttestationFilename(`${volunteer.prenom} ${volunteer.nom}`, program.title);
+      const uploadedFile = await uploadFromBuffer(Buffer.from(pdfBytes), `attestations/${attestationId}`, filename);
 
       attestation.fileUrl = uploadedFile.secure_url;
+      attestation.fileName = filename;
       attestation.uploadedAt = new Date();
       await volunteer.save();
 
