@@ -196,27 +196,44 @@ async function renderCertificatePdf({ program, volunteerName, description, qrUrl
 }
 
 // Nom de fichier lisible pour le PDF téléchargé — demande explicite :
-// "<Prénom Nom> <10 premières lettres du titre de la mission> AMP BENIN.pdf"
-// (au lieu du nom aléatoire généré par Cloudinary, sans extension). Testé en
-// direct sur ce compte Cloudinary : pour un upload "raw", c'est le public_id
-// LUI-MÊME qui doit porter l'extension (le paramètre `format` séparé n'a
-// aucun effet sur ce resource_type) — d'où le ".pdf" collé ici plutôt que
-// passé en option.
+// "<Prénom Nom> <10 premières lettres du titre de la mission> AMP BENIN"
+// (au lieu du nom aléatoire généré par Cloudinary).
+//
+// ⚠️ IMPORTANT (testé en direct sur ce compte Cloudinary, 2026-09-10) : le
+// compte a la restriction de sécurité "Restricted media types" active, qui
+// bloque (401) toute livraison "raw" dès que ".pdf" apparaît N'IMPORTE OÙ
+// dans l'URL demandée — public_id, ET même le nom suggéré via le flag
+// fl_attachment (testé aussi : 400 Bad Request). Impossible à contourner en
+// code tant que ce réglage reste actif (Console Cloudinary → Settings →
+// Security → "Restricted media types" / "Allow delivery of PDF and ZIP
+// files" — à activer manuellement pour lever complètement cette limite).
+// En attendant : le fichier est stocké SANS extension dans son public_id
+// (seule façon de rester livrable), et le nom lisible est appliqué à la
+// volée au moment du téléchargement via fl_attachment (SANS ".pdf" dedans,
+// pour ne pas retomber dans le blocage) — voir buildDownloadUrl.
 function sanitizeForFilename(str) {
   return String(str || "")
-    .replace(/[\/\\?%*:|"<>]/g, "")
+    .replace(/[\/\\?%*:|"<>.]/g, "")
     .replace(/\s+/g, " ")
     .trim();
 }
 function buildAttestationFilename(volunteerName, programTitle) {
   const missionPrefix = sanitizeForFilename(programTitle).slice(0, 10).trim();
-  return `${sanitizeForFilename(volunteerName)} ${missionPrefix} AMP BENIN.pdf`;
+  return `${sanitizeForFilename(volunteerName)} ${missionPrefix} AMP BENIN`;
+}
+function buildDownloadUrl(publicId, version, filename) {
+  return cloudinary.url(publicId, {
+    resource_type: "raw",
+    type: "upload",
+    version,
+    flags: `attachment:${filename}`,
+  });
 }
 
-const uploadFromBuffer = (buffer, folder, publicId) => {
+const uploadFromBuffer = (buffer, folder) => {
   return new Promise((resolve, reject) => {
     const uploadStream = cloudinary.uploader.upload_stream(
-      { folder, resource_type: "raw", public_id: publicId },
+      { folder, resource_type: "raw" },
       (error, result) => {
         if (error) return reject(error);
         resolve(result);
@@ -293,13 +310,12 @@ const generateCertificate = async (req, res) => {
 
       // Dossier nommé par l'ID de l'attestation : garantit l'unicité côté
       // Cloudinary (deux volontaires homonymes sur la même mission
-      // n'écrasent pas le fichier l'un de l'autre) SANS polluer le nom de
-      // fichier visible, qui reste exactement "<nom> <mission> AMP BENIN.pdf".
+      // n'écrasent pas le fichier l'un de l'autre).
       const filename = buildAttestationFilename(`${volunteer.prenom} ${volunteer.nom}`, program.title);
-      const uploadedFile = await uploadFromBuffer(Buffer.from(pdfBytes), `attestations/${attestationId}`, filename);
+      const uploadedFile = await uploadFromBuffer(Buffer.from(pdfBytes), `attestations/${attestationId}`);
 
-      attestation.fileUrl = uploadedFile.secure_url;
-      attestation.fileName = filename;
+      attestation.fileUrl = buildDownloadUrl(uploadedFile.public_id, uploadedFile.version, filename);
+      attestation.fileName = `${filename}.pdf`;
       attestation.uploadedAt = new Date();
       await volunteer.save();
 
