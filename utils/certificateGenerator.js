@@ -18,6 +18,8 @@
  * document PDF imprimable malgré ce nouveau mode de génération du visuel.
  */
 const sharp = require("sharp");
+const fs = require("fs");
+const path = require("path");
 
 // fetch natif (Node 18+, disponible ici) plutôt qu'ajouter axios comme
 // nouvelle dépendance — ce backend ne l'a pas contrairement à celui des votes.
@@ -35,31 +37,85 @@ function escapeXml(value) {
     .replace(/"/g, "&quot;");
 }
 
-const DESCRIPTION_FONT_FAMILY = "Arial, sans-serif";
+/* ---------- Polices embarquées (CRITIQUE — voir incident 2026-09-10) ----------
+ * En local (Windows), "Arial"/"Georgia"/"Times New Roman" existent comme
+ * polices système, donc les textes SVG s'affichaient correctement pendant
+ * tous les tests locaux. En production (Railway, conteneur Linux), AUCUNE
+ * de ces polices n'est installée — le moteur de rasterisation (librsvg, via
+ * sharp) retombe alors sur une police de substitution qui ne sait dessiner
+ * que des glyphes illisibles (constaté sur un vrai certificat généré en
+ * prod : nom et description réduits à des blocs façon "uuuu"). Fix : ne
+ * plus JAMAIS compter sur une police système — les polices sont embarquées
+ * directement dans chaque SVG généré (en base64, via @font-face), à partir
+ * des .ttf déjà présents dans assets/fonts/ (utilisés à l'origine par
+ * l'ancien générateur canvas, réutilisés ici). Le rendu est donc identique
+ * quel que soit le serveur, sans dépendance à ce qui y est installé.
+ */
+function loadFontBase64(filename) {
+  return fs.readFileSync(path.join(__dirname, "..", "assets", "fonts", filename)).toString("base64");
+}
+const FONT_BODY_REGULAR_B64 = loadFontBase64("DMSans-Regular.ttf");
+const FONT_BODY_BOLD_B64 = loadFontBase64("DMSans-Bold.ttf");
+const FONT_NOM_B64 = loadFontBase64("Fraunces-Bold.ttf");
 
-// Mesure la largeur réelle (en px) d'un texte tel que rendu par CE moteur de
-// rasterisation — rendu isolé dans un SVG jetable puis recadré (sharp.trim())
-// à la boîte englobante du texte. Nécessaire car ni `word-spacing` ni
-// `textLength`/`lengthAdjust` (les deux essayés d'abord) ne sont respectés
-// ici : vérifié empiriquement (rendu strictement identique avec ou sans ces
-// attributs) — seule une mesure/positionnement basés sur de vrais glyphes
-// fonctionne de façon fiable.
-async function measureTextWidth(text, fontSize, fontFamily, fontWeight = "normal") {
+const FONT_FAMILY_BODY = "AMPCertBody"; // description
+const FONT_FAMILY_NOM = "AMPCertNom"; // nom du volontaire
+
+// Bloc complet (les 3 variants) — pour les rendus faits UNE fois par zone
+// (pas dans une boucle de mesure), où la taille embarquée n'est pas un
+// souci de performance.
+const FULL_FONTS_STYLE = `<style>
+@font-face{font-family:"${FONT_FAMILY_BODY}";font-weight:400;src:url(data:font/ttf;base64,${FONT_BODY_REGULAR_B64}) format("truetype");}
+@font-face{font-family:"${FONT_FAMILY_BODY}";font-weight:700;src:url(data:font/ttf;base64,${FONT_BODY_BOLD_B64}) format("truetype");}
+@font-face{font-family:"${FONT_FAMILY_NOM}";font-weight:700;src:url(data:font/ttf;base64,${FONT_NOM_B64}) format("truetype");}
+</style>`;
+const NOM_ONLY_FONT_STYLE = `<style>@font-face{font-family:"${FONT_FAMILY_NOM}";font-weight:700;src:url(data:font/ttf;base64,${FONT_NOM_B64}) format("truetype");}</style>`;
+const BODY_ONLY_FONTS_STYLE = `<style>
+@font-face{font-family:"${FONT_FAMILY_BODY}";font-weight:400;src:url(data:font/ttf;base64,${FONT_BODY_REGULAR_B64}) format("truetype");}
+@font-face{font-family:"${FONT_FAMILY_BODY}";font-weight:700;src:url(data:font/ttf;base64,${FONT_BODY_BOLD_B64}) format("truetype");}
+</style>`;
+
+const DESCRIPTION_FONT_FAMILY = FONT_FAMILY_BODY;
+
+// Objets fontkit (parsing du .ttf) — créés UNE fois au chargement du
+// module, réutilisés pour toutes les mesures (voir measureTextWidth
+// ci-dessous). @pdf-lib/fontkit est déjà une dépendance du projet (utilisée
+// par l'ancien générateur canvas) — même bibliothèque, juste une API
+// bas-niveau (`create(buffer)` plutôt que `openSync(chemin)`).
+const fontkit = require("@pdf-lib/fontkit");
+const FONTKIT_BODY_REGULAR = fontkit.create(fs.readFileSync(path.join(__dirname, "..", "assets", "fonts", "DMSans-Regular.ttf")));
+const FONTKIT_BODY_BOLD = fontkit.create(fs.readFileSync(path.join(__dirname, "..", "assets", "fonts", "DMSans-Bold.ttf")));
+const FONTKIT_NOM = fontkit.create(fs.readFileSync(path.join(__dirname, "..", "assets", "fonts", "Fraunces-Bold.ttf")));
+
+function fontkitFor(fontFamily, fontWeight) {
+  if (fontFamily === FONT_FAMILY_NOM) return FONTKIT_NOM;
+  return fontWeight === "bold" ? FONTKIT_BODY_BOLD : FONTKIT_BODY_REGULAR;
+}
+
+// Mesure la largeur réelle (en px) d'un texte — directement via les
+// métriques de glyphes de la police (fontkit), PAS via un rendu SVG/sharp
+// comme la toute première version : ce générateur appelle cette fonction
+// une fois par MOT de la description (potentiellement plusieurs centaines
+// de fois par certificat, à cause des tentatives de réduction d'échelle en
+// cascade dans layoutRichDescription) — la version "rendu SVG" faisait
+// tourner la génération complète à ~8 secondes (un rendu + parsing de
+// police à chaque mot), inutilisable pour une génération groupée de
+// plusieurs volontaires. Mesure directe = quasi instantané, et tout aussi
+// exact puisque ce sont LES MÊMES fichiers de police que ceux embarqués
+// pour le rendu final (voir plus haut) — juste sans repasser par un rendu
+// image à chaque fois.
+function measureTextWidth(text, fontSize, fontFamily, fontWeight = "normal") {
   if (!text) return 0;
-  const probeHeight = Math.ceil(fontSize * 1.6);
-  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="4000" height="${probeHeight}"><text x="0" y="${fontSize}" font-size="${fontSize}" font-family="${fontFamily}" font-weight="${fontWeight}">${escapeXml(text)}</text></svg>`;
-  const { info } = await sharp(Buffer.from(svg)).trim().toBuffer({ resolveWithObject: true });
-  return info.width;
+  const font = fontkitFor(fontFamily, fontWeight);
+  const run = font.layout(text);
+  return (run.advanceWidth / font.unitsPerEm) * fontSize;
 }
 
 const spaceWidthCache = new Map();
-async function getSpaceWidth(fontSize, bold) {
+function getSpaceWidth(fontSize, bold) {
   const key = `${fontSize}|${bold}`;
   if (!spaceWidthCache.has(key)) {
-    const fw = bold ? "bold" : "normal";
-    const withSpace = await measureTextWidth("I I", fontSize, DESCRIPTION_FONT_FAMILY, fw);
-    const withoutSpace = await measureTextWidth("II", fontSize, DESCRIPTION_FONT_FAMILY, fw);
-    spaceWidthCache.set(key, Math.max(1, withSpace - withoutSpace));
+    spaceWidthCache.set(key, Math.max(1, measureTextWidth(" ", fontSize, DESCRIPTION_FONT_FAMILY, bold ? "bold" : "normal")));
   }
   return spaceWidthCache.get(key);
 }
@@ -407,12 +463,10 @@ function buildZoneTextValues({ volunteerName, description }) {
 /* -------------------- Chemin SVG (injection XML) -------------------- */
 
 // Police "élégante" pour le nom — empattement (serif) + gras, pour ressortir
-// visuellement du reste du texte (demande explicite). Repli sur des polices
-// serif largement disponibles côté serveur (le rendu SVG n'a pas accès aux
-// polices custom du poste de conception) : si "Playfair Display" n'est pas
-// installée sur le serveur, le moteur de rendu retombe sur Georgia puis sur
-// le serif générique du système — reste élégant dans tous les cas.
-const NOM_FONT_FAMILY = "'Playfair Display', Georgia, 'Times New Roman', serif";
+// visuellement du reste du texte (demande explicite) : Fraunces, embarquée
+// (voir plus haut) — PAS un nom de police système, qui ne serait pas
+// disponible en production (voir l'incident du 2026-09-10 en tête de fichier).
+const NOM_FONT_FAMILY = FONT_FAMILY_NOM;
 const NOM_DEFAULT_COLOR = "#1B4332"; // vert sombre — identité visuelle AMP Bénin
 
 async function buildTextElement(zone, value) {
@@ -432,14 +486,17 @@ async function buildTextElement(zone, value) {
   // zone.color). Toute autre zone texte simple garde le rendu neutre.
   const isNom = zone.nom === "nom";
   const textColor = isNom ? zone.color || NOM_DEFAULT_COLOR : color;
-  const fontFamily = isNom ? NOM_FONT_FAMILY : "Arial, sans-serif";
+  const fontFamily = isNom ? NOM_FONT_FAMILY : DESCRIPTION_FONT_FAMILY;
   const fontWeight = isNom ? "bold" : "normal";
   const textY = zone.y + zone.height / 2 + fontSize * 0.35;
   return `<text x="${zone.x + zone.width / 2}" y="${textY}" font-size="${fontSize}" fill="${textColor}" font-family="${fontFamily}" font-weight="${fontWeight}" text-anchor="middle">${escapeXml(value)}</text>`;
 }
 
 async function buildZoneElementsSvg(zones, qrDataUri, textValues) {
-  const elements = [];
+  // Polices embarquées une seule fois pour tout le document (nom + toutes
+  // les zones texte de la description partagent le même <svg> final ici,
+  // contrairement au chemin raster où chaque zone est un document séparé).
+  const elements = [FULL_FONTS_STYLE];
   for (const zone of zones) {
     if (zone.nom === "qr") {
       elements.push(
@@ -493,21 +550,27 @@ async function buildTextZonePng(value, zone) {
   const fontSize = zone.fontSize || 24;
   const color = zone.color || "#000000";
 
+  // Chaque zone raster est un <svg> autonome et séparé (composité ensuite
+  // via sharp().composite()) — les polices doivent donc être embarquées
+  // DANS CE document, pas seulement une fois globalement.
   let svgContent;
+  let fontStyle;
   if (zone.nom === "description") {
     // Origine (0,0) locale à ce calque, contrairement au chemin SVG (qui
     // travaille dans les coordonnées absolues du visuel).
+    fontStyle = BODY_ONLY_FONTS_STYLE;
     svgContent = await renderDescriptionZone(value, { x: 0, y: 0, width, height, fontSize: zone.fontSize, color: zone.color });
   } else {
     const isNom = zone.nom === "nom";
+    fontStyle = isNom ? NOM_ONLY_FONT_STYLE : BODY_ONLY_FONTS_STYLE;
     const textColor = isNom ? zone.color || NOM_DEFAULT_COLOR : color;
-    const fontFamily = isNom ? NOM_FONT_FAMILY : "Arial, sans-serif";
+    const fontFamily = isNom ? NOM_FONT_FAMILY : DESCRIPTION_FONT_FAMILY;
     const fontWeight = isNom ? "bold" : "normal";
     const textY = height / 2 + fontSize * 0.35;
     svgContent = `<text x="${width / 2}" y="${textY}" font-size="${fontSize}" fill="${textColor}" font-family="${fontFamily}" font-weight="${fontWeight}" text-anchor="middle">${escapeXml(value)}</text>`;
   }
 
-  const snippet = `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}">${svgContent}</svg>`;
+  const snippet = `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}">${fontStyle}${svgContent}</svg>`;
   return sharp(Buffer.from(snippet)).png().toBuffer();
 }
 
