@@ -39,7 +39,7 @@ router.get("/verify/:id", verifyAttestation);
 // permet de vérifier en un clic (simple visite d'URL, sans console) que le
 // déploiement en ligne correspond bien à ce commit.
 router.get("/_diag", (req, res) => {
-  res.json({ ok: true, marker: "certif-template-v1", deployedAt: "2026-09-10T13:40Z" });
+  res.json({ ok: true, marker: "certif-fontfix-v2", deployedAt: "2026-09-10T22:15Z" });
 });
 
 module.exports = router;
