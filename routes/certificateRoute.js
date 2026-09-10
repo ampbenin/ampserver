@@ -5,6 +5,7 @@ const {
   fetchVolunteersForCertificate,
   uploadCertificateTemplate,
   generateCertificate,
+  resetCertificates,
   verifyAttestation,
 } = require("../controllers/certificateController");
 const authMiddleware = require("../middlewares/gestionamp/authMiddleware");
@@ -23,6 +24,10 @@ const upload = multer({
 router.get("/programs/:programId/eligible-volunteers", authMiddleware, fetchVolunteersForCertificate);
 router.put("/programs/:programId/template", authMiddleware, upload.single("file"), uploadCertificateTemplate);
 router.post("/programs/:programId/generate", authMiddleware, generateCertificate);
+// Réinitialise (retire) l'attestation d'un/plusieurs volontaires pour ce
+// programme — les fait réapparaître dans "éligibles" pour pouvoir relancer
+// la génération (ex : PDF généré avant le correctif de police cassée).
+router.post("/programs/:programId/reset", authMiddleware, resetCertificates);
 
 // 🌐 QR Code public → vérification d'une attestation (auto-service de
 // téléchargement par email/nom supprimé le 2026-08-19 — chaque volontaire

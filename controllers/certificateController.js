@@ -294,6 +294,55 @@ const generateCertificate = async (req, res) => {
   }
 };
 
+/* -------------------- Staff : réinitialiser l'attestation d'un/plusieurs volontaires (pour pouvoir la régénérer) -------------------- */
+// Demandé le 2026-09-10 : après le correctif du bug de police cassée en
+// production, certaines attestations déjà générées ont un PDF illisible —
+// il faut pouvoir les "nettoyer" pour que le volontaire redevienne éligible
+// et qu'on puisse relancer la génération, sans devoir toucher la base
+// manuellement. Retire juste l'entrée `attestations` correspondant à ce
+// programme (le volontaire réapparaît alors dans la liste des éligibles).
+// Le fichier PDF déjà uploadé sur Cloudinary n'est PAS supprimé (son
+// public_id n'est pas conservé sur l'attestation, seulement fileUrl) — reste
+// orphelin sur Cloudinary, sans conséquence fonctionnelle.
+const resetCertificates = async (req, res) => {
+  try {
+    const { programId } = req.params;
+    const { volunteerIds } = req.body || {};
+    if (!Array.isArray(volunteerIds) || volunteerIds.length === 0) {
+      return res.status(400).json({ message: "volunteerIds requis (au moins un volontaire)" });
+    }
+
+    const Program = getVolunteerProgramModel();
+    const program = await Program.findById(programId).select("title reviewerIds editorIds");
+    if (!program) return res.status(404).json({ message: "Programme introuvable" });
+    if (!canReviewProgram(program, req.user)) {
+      return res.status(403).json({ message: "Vous n'êtes pas autorisé à gérer ce programme" });
+    }
+
+    const volunteers = await Volunteer.find({
+      _id: { $in: volunteerIds },
+      "attestations.programId": program._id,
+    });
+
+    let resetCount = 0;
+    for (const volunteer of volunteers) {
+      const before = volunteer.attestations.length;
+      volunteer.attestations = volunteer.attestations.filter(
+        (a) => a.programId.toString() !== program._id.toString()
+      );
+      if (volunteer.attestations.length !== before) {
+        await volunteer.save();
+        resetCount++;
+      }
+    }
+
+    res.status(200).json({ message: "Attestations réinitialisées", reset: resetCount });
+  } catch (error) {
+    console.error("❌ resetCertificates erreur :", error);
+    res.status(500).json({ message: error.message || "Erreur serveur" });
+  }
+};
+
 /* -------------------- Public : vérification d'une attestation via son ObjectId (scan QR) -------------------- */
 const verifyAttestation = async (req, res) => {
   try {
@@ -329,5 +378,6 @@ module.exports = {
   fetchVolunteersForCertificate,
   uploadCertificateTemplate,
   generateCertificate,
+  resetCertificates,
   verifyAttestation,
 };
