@@ -192,7 +192,7 @@ exports.forgotPassword = async (req, res) => {
     user.passwordResetExpires = new Date(Date.now() + 60 * 60 * 1000); // 1h
     await user.save();
 
-    const frontendBase = process.env.FRONTEND_URL || "https://ampbenin.netlify.app";
+    const frontendBase = process.env.FRONTEND_URL || "https://ampbenin.org";
     const resetUrl = `${frontendBase}/reset-password?token=${rawToken}&email=${encodeURIComponent(email)}`;
 
     try {

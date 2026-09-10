@@ -7,6 +7,13 @@ const { PDFDocument } = require("pdf-lib");
 const sharp = require("sharp");
 const streamifier = require("streamifier");
 
+// Même pattern que volunteerAuthController.js / volunteerApplicationController.js
+// / gestionamp/authController.js : domaine du frontend configurable via
+// FRONTEND_URL, secours sur le domaine propre ampbenin.org (nom de domaine
+// personnalisé branché sur Netlify, 2026-09-10 — remplace l'ancien
+// sous-domaine ampbenin.netlify.app utilisé partout avant ça).
+const FRONTEND_BASE = process.env.FRONTEND_URL || "https://ampbenin.org";
+
 /* Refondu le 2026-08-19 (raisonne par programId, autorisation via
    canReviewProgram) puis à nouveau le 2026-09-10 (décision utilisateur) :
    remplace le fond dessiné par code (identique pour tous les programmes,
@@ -263,7 +270,7 @@ const generateCertificate = async (req, res) => {
         program,
         volunteerName: `${volunteer.prenom} ${volunteer.nom}`,
         description: program.certificateDescription,
-        qrUrl: `https://ampbenin.netlify.app/verify/${attestationId}`,
+        qrUrl: `${FRONTEND_BASE}/verify/${attestationId}`,
       });
 
       const uploadedFile = await uploadFromBuffer(Buffer.from(pdfBytes), "attestations");

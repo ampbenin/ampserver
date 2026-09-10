@@ -23,7 +23,7 @@ const loginAttemptLimiter = require("../utils/loginAttemptLimiter");
 // sandbox Resend, restreint à l'email du propriétaire du compte : les
 // emails vers de vrais destinataires n'arrivaient plus avec cette adresse).
 const RESEND_FROM = "VOLONTAIRE AMP BENIN <candidatures@ampbenin.org>";
-const FRONTEND_BASE = process.env.FRONTEND_URL || "https://ampbenin.netlify.app";
+const FRONTEND_BASE = process.env.FRONTEND_URL || "https://ampbenin.org";
 const AMP_BRAND = {
   brandLabel: "AMP BÉNIN — Volontariat",
   footerText: "AMP BÉNIN — Programme de volontariat · Ceci est un message automatique.",

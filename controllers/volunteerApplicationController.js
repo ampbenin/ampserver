@@ -26,7 +26,7 @@ const { closeExpiredPrograms, canReviewProgram, DEFAULT_BUILTIN_FIELDS } = requi
 const { validateApplicationResponses } = require("../utils/applicationFormLogic");
 const { generateSetPasswordUrl } = require("./volunteerAuthController");
 
-const FRONTEND_BASE = process.env.FRONTEND_URL || "https://ampbenin.netlify.app";
+const FRONTEND_BASE = process.env.FRONTEND_URL || "https://ampbenin.org";
 
 // Fixé en dur (pas de process.env.RESEND_FROM_EMAIL) : cette variable est
 // partagée avec NumSAL (controllers/numsal/*.js) et réglée côté serveur sur
