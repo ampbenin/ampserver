@@ -275,12 +275,26 @@ function buildAttestationFilename(volunteerName, programTitle) {
   const missionPrefix = sanitizeForFilename(programTitle).slice(0, 10).trim();
   return `${sanitizeForFilename(volunteerName)} ${missionPrefix} AMP BENIN`;
 }
+// Retire les accents/diacritiques (é→e, è→e, à→a...) — CRITIQUE pour
+// fl_attachment : testé en direct sur ce compte Cloudinary, un nom accentué
+// (courant pour un volontaire béninois/francophone, ex : "Yénoukounmè")
+// fait échouer la requête avec un 400, MÊME correctement percent-encodé
+// (%C3%A9...) — Cloudinary semble n'accepter que de l'ASCII dans cette
+// valeur de flag. Uniquement pour l'URL Cloudinary : `fileName` (utilisé
+// par le téléchargement navigateur via l'attribut `download`, voir
+// VolunteerProgramEditor.jsx/Dashboard.jsx) garde lui les accents, aucune
+// restriction de ce genre côté navigateur.
+function toAsciiSafe(str) {
+  return String(str || "")
+    .normalize("NFD")
+    .replace(/[̀-ͯ]/g, "");
+}
 function buildDownloadUrl(publicId, version, filename) {
   return cloudinary.url(publicId, {
     resource_type: "raw",
     type: "upload",
     version,
-    flags: `attachment:${filename}`,
+    flags: `attachment:${toAsciiSafe(filename)}`,
   });
 }
 
