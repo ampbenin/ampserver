@@ -98,6 +98,22 @@ const VolunteerSchema = new mongoose.Schema(
         // totalement retirée de la réponse de "Mon espace" (volunteerAuthController.js#me)
         // — le volontaire ne la voit pas du tout, pas juste un lien désactivé.
         visibleToVolunteer: { type: Boolean, default: true },
+        // Dénonciations reçues depuis la page publique de vérification
+        // (bouton "Non, les infos ne correspondent pas" — voir
+        // VerifyAttestation.jsx / certificateController.js#reportAttestation).
+        // Remplace l'ancienne intégration cassée (fonction Netlify
+        // /.netlify/functions/reportAttestation jamais implémentée — le
+        // bouton ne faisait donc rien, corrigé le 2026-09-11) : stocké ici
+        // pour laisser une trace consultable, en plus de l'email envoyé au
+        // staff au moment du signalement.
+        reports: [
+          {
+            anonymous: { type: Boolean, default: true },
+            reporterName: { type: String, default: "" },
+            message: { type: String, required: true },
+            reportedAt: { type: Date, default: Date.now },
+          },
+        ],
       },
     ],
   },

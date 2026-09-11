@@ -8,8 +8,10 @@ const {
   resetCertificates,
   setCertificateVisibility,
   verifyAttestation,
+  reportAttestation,
 } = require("../controllers/certificateController");
 const authMiddleware = require("../middlewares/gestionamp/authMiddleware");
+const { authLimiter } = require("../config/rateLimit");
 
 // Mêmes limites que le champ image existant le plus proche (partners-bar,
 // voir volunteerProgramRoute.js) — un peu plus large (10 Mo) pour couvrir un
@@ -37,6 +39,11 @@ router.post("/programs/:programId/visibility", authMiddleware, setCertificateVis
 // téléchargement par email/nom supprimé le 2026-08-19 — chaque volontaire
 // télécharge désormais depuis son espace authentifié, "Mon espace").
 router.get("/verify/:id", verifyAttestation);
+// Bouton "Non, les infos ne correspondent pas" de la page de vérification
+// — remplace l'ancien appel vers /.netlify/functions/reportAttestation,
+// jamais implémenté (bouton mort). Limité en fréquence (mêmes seuils que
+// authLimiter) pour freiner le spam sans gêner un usage normal.
+router.post("/verify/:id/report", authLimiter, reportAttestation);
 
 // 🔧 Diagnostic temporaire (2026-09-10) — à retirer une fois le souci de
 // déploiement Railway confirmé/résolu. Public, pas d'info sensible :

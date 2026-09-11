@@ -574,6 +574,61 @@ const verifyAttestation = async (req, res) => {
   }
 };
 
+/* -------------------- Public : dénonciation depuis la page de vérification -------------------- */
+// Corrige le bouton "Non, les infos ne correspondent pas" de
+// VerifyAttestation.jsx : il postait vers /.netlify/functions/reportAttestation,
+// une fonction Netlify jamais implémentée (aucun fichier source, aucune
+// entrée dans netlify.toml) — 404 silencieux, le bouton ne faisait donc
+// rien. Remplacé par cette route backend classique, cohérente avec le
+// reste du projet (rien de custom côté Netlify).
+const reportAttestation = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { anonymous, name, message } = req.body || {};
+    if (!id) return res.status(400).json({ message: "ID de l'attestation manquant" });
+    if (!message || !message.trim()) {
+      return res.status(400).json({ message: "Un message est requis pour la dénonciation" });
+    }
+
+    const volunteer = await Volunteer.findOne({ "attestations._id": id });
+    if (!volunteer) return res.status(404).json({ message: "Attestation introuvable" });
+
+    const attestation = volunteer.attestations.id(id);
+    if (!attestation) return res.status(404).json({ message: "Attestation introuvable" });
+
+    const isAnonymous = anonymous !== false;
+    attestation.reports.push({
+      anonymous: isAnonymous,
+      reporterName: isAnonymous ? "" : String(name || "").trim(),
+      message: String(message).trim(),
+    });
+    await volunteer.save();
+
+    // Best-effort : le signalement est déjà en base (source de vérité) même
+    // si l'email échoue — ne bloque jamais la réponse au dénonciateur.
+    try {
+      await resend.emails.send({
+        from: RESEND_FROM,
+        to: "contact@ampbenin.org",
+        subject: `🚨 Dénonciation attestation — ${volunteer.prenom} ${volunteer.nom}`,
+        text:
+          `Une dénonciation a été soumise depuis la page de vérification publique.\n\n` +
+          `Volontaire concerné : ${volunteer.prenom} ${volunteer.nom} (${volunteer.email})\n` +
+          `Attestation ID : ${id}\n` +
+          `Dénonciateur : ${isAnonymous ? "Anonyme" : String(name || "").trim() || "(nom non renseigné)"}\n\n` +
+          `Message :\n${String(message).trim()}`,
+      });
+    } catch (mailError) {
+      console.error("❌ Erreur envoi email dénonciation :", mailError.message);
+    }
+
+    res.status(200).json({ message: "Dénonciation enregistrée" });
+  } catch (error) {
+    console.error("❌ reportAttestation erreur :", error);
+    res.status(500).json({ message: error.message || "Erreur serveur" });
+  }
+};
+
 module.exports = {
   fetchVolunteersForCertificate,
   uploadCertificateTemplate,
@@ -581,4 +636,5 @@ module.exports = {
   resetCertificates,
   setCertificateVisibility,
   verifyAttestation,
+  reportAttestation,
 };
