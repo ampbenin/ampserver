@@ -38,12 +38,24 @@ const FRONTEND_BASE = process.env.FRONTEND_URL || "https://ampbenin.org";
    utilisateur) — voir la vérification dans generateCertificate. */
 
 /* -------------------- Staff : volontaires éligibles + déjà générés pour un programme -------------------- */
+// Score (%) affiché pour prioriser qui générer/activer en premier — MÊME
+// calcul que celui qui détermine "Mission validée" (computeProgress, voir
+// volunteerTaskController.js#finalizeMissions) : tâches publiées hors
+// rapport de fin de mission, occurrences dues depuis l'affectation jusqu'à
+// la fin du programme, % de soumissions approuvées. Un volontaire "Mission
+// validée" a normalement déjà ≥ missionValidationThreshold, mais le score
+// exact (souvent > au seuil) reste utile pour départager/prioriser.
+const getVolunteerTaskSubmissionModel = require("../models/volunteerTaskSubmission");
+const { computeProgress } = require("../utils/volunteerTaskLogic");
+const { getPublishedTasks } = require("./volunteerTaskController");
+const getRegularTasksForScore = (program) => getPublishedTasks(program).filter((t) => !t.isFinalReport);
+
 const fetchVolunteersForCertificate = async (req, res) => {
   try {
     const { programId } = req.params;
     const Program = getVolunteerProgramModel();
     const program = await Program.findById(programId).select(
-      "title reviewerIds editorIds certificateTemplateUrl"
+      "title reviewerIds editorIds certificateTemplateUrl tasks endDate"
     );
     if (!program) return res.status(404).json({ message: "Programme introuvable" });
     if (!canReviewProgram(program, req.user)) {
@@ -51,6 +63,21 @@ const fetchVolunteersForCertificate = async (req, res) => {
     }
 
     const volunteers = await Volunteer.find({ "programs.programId": program._id }).lean();
+    const regularTasks = getRegularTasksForScore(program);
+
+    // Un seul aller-retour DB pour toutes les soumissions de tous ces
+    // volontaires sur ce programme, plutôt qu'une requête par volontaire.
+    const Submission = getVolunteerTaskSubmissionModel();
+    const allSubmissions = await Submission.find({
+      programId: program._id,
+      volunteerId: { $in: volunteers.map((v) => v._id) },
+    }).lean();
+    const submissionsByVolunteer = new Map();
+    allSubmissions.forEach((s) => {
+      const key = s.volunteerId.toString();
+      if (!submissionsByVolunteer.has(key)) submissionsByVolunteer.set(key, []);
+      submissionsByVolunteer.get(key).push(s);
+    });
 
     const eligible = [];
     const alreadyGenerated = [];
@@ -58,8 +85,15 @@ const fetchVolunteersForCertificate = async (req, res) => {
       const programData = v.programs.find((p) => p.programId.toString() === program._id.toString());
       if (programData?.statut !== "Mission validée") return;
 
+      const { percent } = computeProgress(
+        regularTasks,
+        programData.assignedAt,
+        program.endDate,
+        submissionsByVolunteer.get(v._id.toString()) || []
+      );
+
       const existing = v.attestations?.find((a) => a.programId.toString() === program._id.toString());
-      const summary = { volunteerId: v._id, nom: v.nom, prenom: v.prenom, email: v.email, telephone: v.telephone };
+      const summary = { volunteerId: v._id, nom: v.nom, prenom: v.prenom, email: v.email, telephone: v.telephone, score: percent };
       if (existing?.fileUrl) {
         alreadyGenerated.push({
           ...summary,
@@ -72,6 +106,10 @@ const fetchVolunteersForCertificate = async (req, res) => {
         eligible.push(summary);
       }
     });
+
+    // Score décroissant (les plus avancés en premier), pour prioriser.
+    eligible.sort((a, b) => b.score - a.score);
+    alreadyGenerated.sort((a, b) => b.score - a.score);
 
     res.status(200).json({
       programTitle: program.title,
@@ -311,6 +349,11 @@ const generateCertificate = async (req, res) => {
         programId: program._id,
         programName: program.title,
         statut: "Mission validée",
+        // Masquée par défaut (demande explicite, 2026-09-11) — un
+        // ADMIN/EDITOR doit l'activer manuellement (bouton "Activer",
+        // éventuellement avec notification par email) avant qu'elle
+        // n'apparaisse dans "Mon espace" du volontaire.
+        visibleToVolunteer: false,
       });
       await volunteer.save();
 
