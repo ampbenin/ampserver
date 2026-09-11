@@ -51,7 +51,7 @@ const fetchVolunteersForCertificate = async (req, res) => {
       const existing = v.attestations?.find((a) => a.programId.toString() === program._id.toString());
       const summary = { volunteerId: v._id, nom: v.nom, prenom: v.prenom, email: v.email, telephone: v.telephone };
       if (existing?.fileUrl) {
-        alreadyGenerated.push({ ...summary, fileUrl: existing.fileUrl, uploadedAt: existing.uploadedAt });
+        alreadyGenerated.push({ ...summary, fileUrl: existing.fileUrl, fileName: existing.fileName, uploadedAt: existing.uploadedAt });
       } else {
         eligible.push(summary);
       }
@@ -407,6 +407,7 @@ const verifyAttestation = async (req, res) => {
       mission: program.title,
       date: attestation.uploadedAt || volunteer.updatedAt,
       fileUrl: attestation.fileUrl || null,
+      fileName: attestation.fileName || null,
     });
   } catch (error) {
     console.error("❌ verifyAttestation erreur :", error);
