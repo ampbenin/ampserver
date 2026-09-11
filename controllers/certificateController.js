@@ -393,6 +393,90 @@ const generateCertificate = async (req, res) => {
   }
 };
 
+/* -------------------- Staff : lister/traiter les dénonciations reçues sur ce programme -------------------- */
+// Contrepartie admin de reportAttestation ci-dessous (bouton "Non, les
+// infos ne correspondent pas" de la page publique de vérification) —
+// jusqu'ici enregistrées en base mais consultables nulle part côté admin.
+const fetchAttestationReports = async (req, res) => {
+  try {
+    const { programId } = req.params;
+    const Program = getVolunteerProgramModel();
+    const program = await Program.findById(programId).select("title reviewerIds editorIds");
+    if (!program) return res.status(404).json({ message: "Programme introuvable" });
+    if (!canReviewProgram(program, req.user)) {
+      return res.status(403).json({ message: "Vous n'êtes pas autorisé à gérer ce programme" });
+    }
+
+    const volunteers = await Volunteer.find({
+      "attestations.programId": program._id,
+      "attestations.reports.0": { $exists: true },
+    }).lean();
+
+    const reports = [];
+    volunteers.forEach((v) => {
+      (v.attestations || [])
+        .filter((a) => a.programId.toString() === program._id.toString())
+        .forEach((a) => {
+          (a.reports || []).forEach((r) => {
+            reports.push({
+              reportId: r._id,
+              attestationId: a._id,
+              volunteerId: v._id,
+              volunteerNom: v.nom,
+              volunteerPrenom: v.prenom,
+              volunteerEmail: v.email,
+              anonymous: r.anonymous,
+              reporterName: r.reporterName,
+              message: r.message,
+              reportedAt: r.reportedAt,
+            });
+          });
+        });
+    });
+
+    // Plus récentes en premier.
+    reports.sort((a, b) => new Date(b.reportedAt) - new Date(a.reportedAt));
+
+    res.status(200).json({ reports });
+  } catch (error) {
+    console.error("❌ fetchAttestationReports erreur :", error);
+    res.status(500).json({ message: error.message || "Erreur serveur" });
+  }
+};
+
+// Marque une dénonciation comme traitée (la retire simplement — pas de
+// statut "résolu" séparé, décision volontairement minimale : l'admin a lu
+// le message, a agi si besoin (ex : /reset + régénération), et l'efface).
+const dismissAttestationReport = async (req, res) => {
+  try {
+    const { programId, volunteerId, reportId } = req.params;
+    const Program = getVolunteerProgramModel();
+    const program = await Program.findById(programId).select("title reviewerIds editorIds");
+    if (!program) return res.status(404).json({ message: "Programme introuvable" });
+    if (!canReviewProgram(program, req.user)) {
+      return res.status(403).json({ message: "Vous n'êtes pas autorisé à gérer ce programme" });
+    }
+
+    const volunteer = await Volunteer.findById(volunteerId);
+    if (!volunteer) return res.status(404).json({ message: "Volontaire introuvable" });
+
+    const attestation = volunteer.attestations.find((a) => a.programId.toString() === program._id.toString());
+    if (!attestation) return res.status(404).json({ message: "Attestation introuvable" });
+
+    const before = attestation.reports.length;
+    attestation.reports = attestation.reports.filter((r) => r._id.toString() !== reportId);
+    if (attestation.reports.length === before) {
+      return res.status(404).json({ message: "Dénonciation introuvable" });
+    }
+    await volunteer.save();
+
+    res.status(200).json({ message: "Dénonciation traitée" });
+  } catch (error) {
+    console.error("❌ dismissAttestationReport erreur :", error);
+    res.status(500).json({ message: error.message || "Erreur serveur" });
+  }
+};
+
 /* -------------------- Staff : réinitialiser l'attestation d'un/plusieurs volontaires (pour pouvoir la régénérer) -------------------- */
 // Demandé le 2026-09-10 : après le correctif du bug de police cassée en
 // production, certaines attestations déjà générées ont un PDF illisible —
@@ -637,4 +721,6 @@ module.exports = {
   setCertificateVisibility,
   verifyAttestation,
   reportAttestation,
+  fetchAttestationReports,
+  dismissAttestationReport,
 };

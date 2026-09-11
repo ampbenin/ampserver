@@ -9,6 +9,8 @@ const {
   setCertificateVisibility,
   verifyAttestation,
   reportAttestation,
+  fetchAttestationReports,
+  dismissAttestationReport,
 } = require("../controllers/certificateController");
 const authMiddleware = require("../middlewares/gestionamp/authMiddleware");
 const { authLimiter } = require("../config/rateLimit");
@@ -34,6 +36,11 @@ router.post("/programs/:programId/reset", authMiddleware, resetCertificates);
 // Active/désactive la visibilité d'une attestation dans "Mon espace" (sans
 // la supprimer, contrairement à /reset) — body : { volunteerIds, visible }.
 router.post("/programs/:programId/visibility", authMiddleware, setCertificateVisibility);
+// Dénonciations reçues sur ce programme (voir /verify/:id/report ci-dessous)
+// — contrepartie admin, jusqu'ici enregistrées en base sans être visibles
+// nulle part côté admin.
+router.get("/programs/:programId/reports", authMiddleware, fetchAttestationReports);
+router.delete("/programs/:programId/reports/:volunteerId/:reportId", authMiddleware, dismissAttestationReport);
 
 // 🌐 QR Code public → vérification d'une attestation (auto-service de
 // téléchargement par email/nom supprimé le 2026-08-19 — chaque volontaire
