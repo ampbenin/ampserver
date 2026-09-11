@@ -513,9 +513,24 @@ function buildZoneTextValues({ volunteerName, description }) {
 // disponible en production (voir l'incident du 2026-09-10 en tête de fichier).
 const NOM_FONT_FAMILY = FONT_FAMILY_NOM;
 const NOM_DEFAULT_COLOR = "#1B4332"; // vert sombre — identité visuelle AMP Bénin
+const NOM_MIN_FONT_SIZE = 16; // plancher — au-delà, un nom trop long deviendrait illisible
+
+// Réduit automatiquement la taille de police du nom si le texte, à la
+// taille configurée sur la zone, dépasserait sa largeur — demande
+// explicite (certains noms/prénoms longs étaient coupés à gauche/droite).
+// Mesure directe via fontkit (measureTextWidth, synchrone, pas de rendu) :
+// la largeur est strictement proportionnelle à la taille de police pour un
+// même texte, donc un seul calcul suffit (pas besoin de boucle itérative
+// comme pour la description, qui doit aussi gérer le retour à la ligne).
+function fitNomFontSize(text, zone) {
+  const requestedSize = zone.fontSize || 24;
+  const widthAtRequested = measureTextWidth(text, requestedSize, NOM_FONT_FAMILY, "bold");
+  const maxWidth = zone.width * 0.96; // petite marge de sécurité de chaque côté
+  if (!widthAtRequested || widthAtRequested <= maxWidth) return requestedSize;
+  return Math.max(NOM_MIN_FONT_SIZE, requestedSize * (maxWidth / widthAtRequested));
+}
 
 async function buildTextElement(zone, value) {
-  const fontSize = zone.fontSize || 24;
   const color = zone.color || "#000000";
 
   // Description : HTML riche (gras/souligné/couleur/taille/alignement,
@@ -528,16 +543,18 @@ async function buildTextElement(zone, value) {
   }
 
   // "nom" : gras, police élégante, vert sombre par défaut (surchargeable via
-  // zone.color). Toute autre zone texte simple garde le rendu neutre.
+  // zone.color), taille auto-réduite si besoin (fitNomFontSize). Toute
+  // autre zone texte simple garde le rendu neutre à taille fixe.
   const isNom = zone.nom === "nom";
   const textColor = isNom ? zone.color || NOM_DEFAULT_COLOR : color;
   const fontFamily = isNom ? NOM_FONT_FAMILY : DESCRIPTION_FONT_FAMILY;
   const fontWeight = isNom ? "bold" : "normal";
+  const fontSize = isNom ? fitNomFontSize(value, zone) : zone.fontSize || 24;
   // "nom" : aligné en BAS du cadre (demande explicite, 2026-09-10) — pas
   // centré verticalement. `fontSize * 0.25` de marge pour laisser la place
   // aux jambages (g, j, p...) sans qu'ils dépassent le bas du cadre.
   const textY = isNom ? zone.y + zone.height - fontSize * 0.25 : zone.y + zone.height / 2 + fontSize * 0.35;
-  return `<text x="${zone.x + zone.width / 2}" y="${textY}" font-size="${fontSize}" fill="${textColor}" font-family="${fontFamily}" font-weight="${fontWeight}" text-anchor="middle">${escapeXml(value)}</text>`;
+  return `<text x="${zone.x + zone.width / 2}" y="${textY}" font-size="${fontSize.toFixed(1)}" fill="${textColor}" font-family="${fontFamily}" font-weight="${fontWeight}" text-anchor="middle">${escapeXml(value)}</text>`;
 }
 
 async function buildZoneElementsSvg(zones, qrDataUri, textValues) {
@@ -614,8 +631,11 @@ async function buildTextZonePng(value, zone) {
     const textColor = isNom ? zone.color || NOM_DEFAULT_COLOR : color;
     const fontFamily = isNom ? NOM_FONT_FAMILY : DESCRIPTION_FONT_FAMILY;
     const fontWeight = isNom ? "bold" : "normal";
-    const textY = isNom ? height - fontSize * 0.25 : height / 2 + fontSize * 0.35;
-    svgContent = `<text x="${width / 2}" y="${textY}" font-size="${fontSize}" fill="${textColor}" font-family="${fontFamily}" font-weight="${fontWeight}" text-anchor="middle">${escapeXml(value)}</text>`;
+    // Origine (0,0) locale à ce calque — width/height déjà arrondis en px,
+    // mêmes valeurs utilisées pour la mesure que pour le rendu.
+    const effectiveFontSize = isNom ? fitNomFontSize(value, { ...zone, width }) : fontSize;
+    const textY = isNom ? height - effectiveFontSize * 0.25 : height / 2 + effectiveFontSize * 0.35;
+    svgContent = `<text x="${width / 2}" y="${textY}" font-size="${effectiveFontSize.toFixed(1)}" fill="${textColor}" font-family="${fontFamily}" font-weight="${fontWeight}" text-anchor="middle">${escapeXml(value)}</text>`;
   }
 
   const snippet = `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}">${fontStyle}${svgContent}</svg>`;
