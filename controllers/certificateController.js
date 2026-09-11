@@ -51,7 +51,13 @@ const fetchVolunteersForCertificate = async (req, res) => {
       const existing = v.attestations?.find((a) => a.programId.toString() === program._id.toString());
       const summary = { volunteerId: v._id, nom: v.nom, prenom: v.prenom, email: v.email, telephone: v.telephone };
       if (existing?.fileUrl) {
-        alreadyGenerated.push({ ...summary, fileUrl: existing.fileUrl, fileName: existing.fileName, uploadedAt: existing.uploadedAt });
+        alreadyGenerated.push({
+          ...summary,
+          fileUrl: existing.fileUrl,
+          fileName: existing.fileName,
+          uploadedAt: existing.uploadedAt,
+          visibleToVolunteer: existing.visibleToVolunteer !== false,
+        });
       } else {
         eligible.push(summary);
       }
@@ -383,6 +389,54 @@ const resetCertificates = async (req, res) => {
   }
 };
 
+/* -------------------- Staff : activer/désactiver la visibilité d'une attestation dans "Mon espace" -------------------- */
+// Demandé le 2026-09-11 : une attestation générée est immédiatement
+// visible/téléchargeable dans l'espace du volontaire — on veut pouvoir la
+// masquer (sans la supprimer, contrairement à /reset) pour certains
+// volontaires, en sélection individuelle ou groupée ("tout sélectionner").
+// `visible` détermine l'action pour TOUS les volunteerIds donnés en un seul
+// appel (pas de mélange activer/désactiver dans le même appel — l'UI fait
+// deux boutons distincts plutôt qu'un état par ligne à combiner).
+const setCertificateVisibility = async (req, res) => {
+  try {
+    const { programId } = req.params;
+    const { volunteerIds, visible } = req.body || {};
+    if (!Array.isArray(volunteerIds) || volunteerIds.length === 0) {
+      return res.status(400).json({ message: "volunteerIds requis (au moins un volontaire)" });
+    }
+    if (typeof visible !== "boolean") {
+      return res.status(400).json({ message: "visible (booléen) requis" });
+    }
+
+    const Program = getVolunteerProgramModel();
+    const program = await Program.findById(programId).select("title reviewerIds editorIds");
+    if (!program) return res.status(404).json({ message: "Programme introuvable" });
+    if (!canReviewProgram(program, req.user)) {
+      return res.status(403).json({ message: "Vous n'êtes pas autorisé à gérer ce programme" });
+    }
+
+    const volunteers = await Volunteer.find({
+      _id: { $in: volunteerIds },
+      "attestations.programId": program._id,
+    });
+
+    let updatedCount = 0;
+    for (const volunteer of volunteers) {
+      const attestation = volunteer.attestations.find((a) => a.programId.toString() === program._id.toString());
+      if (attestation && attestation.visibleToVolunteer !== visible) {
+        attestation.visibleToVolunteer = visible;
+        await volunteer.save();
+        updatedCount++;
+      }
+    }
+
+    res.status(200).json({ message: "Visibilité mise à jour", updated: updatedCount });
+  } catch (error) {
+    console.error("❌ setCertificateVisibility erreur :", error);
+    res.status(500).json({ message: error.message || "Erreur serveur" });
+  }
+};
+
 /* -------------------- Public : vérification d'une attestation via son ObjectId (scan QR) -------------------- */
 const verifyAttestation = async (req, res) => {
   try {
@@ -399,6 +453,14 @@ const verifyAttestation = async (req, res) => {
     const program = await Program.findById(attestation.programId).lean();
     if (!program) return res.json({ error: true });
 
+    // ⚠️ Sécurité (2026-09-11) : cette route est PUBLIQUE (aucune
+    // authentification — quiconque scanne le QR code, ou devine/partage ce
+    // lien, y accède). fileUrl/fileName ont été retirés de la réponse :
+    // n'importe qui pouvait télécharger l'attestation officielle d'un tiers,
+    // ce n'est pas le rôle de cette page — elle sert UNIQUEMENT à confirmer
+    // l'authenticité (nom/mission/date), pas à distribuer le PDF. Le
+    // téléchargement reste possible pour le volontaire lui-même, depuis son
+    // espace authentifié ("Mon espace").
     res.json({
       nom: volunteer.nom,
       prenom: volunteer.prenom,
@@ -406,8 +468,6 @@ const verifyAttestation = async (req, res) => {
       telephone: volunteer.telephone,
       mission: program.title,
       date: attestation.uploadedAt || volunteer.updatedAt,
-      fileUrl: attestation.fileUrl || null,
-      fileName: attestation.fileName || null,
     });
   } catch (error) {
     console.error("❌ verifyAttestation erreur :", error);
@@ -420,5 +480,6 @@ module.exports = {
   uploadCertificateTemplate,
   generateCertificate,
   resetCertificates,
+  setCertificateVisibility,
   verifyAttestation,
 };

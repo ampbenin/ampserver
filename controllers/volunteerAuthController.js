@@ -246,6 +246,13 @@ exports.me = async (req, res, next) => {
 
     const [populated] = await attachProgramTitles([volunteer]);
 
+    // Masque les attestations qu'un ADMIN/EDITOR a désactivées pour ce
+    // volontaire (voir POST certificates/.../visibility) — retirées
+    // ENTIÈREMENT ici, pas juste un lien désactivé côté client : le
+    // volontaire ne doit pas savoir qu'une attestation existe tant qu'elle
+    // n'est pas réactivée.
+    populated.attestations = (populated.attestations || []).filter((a) => a.visibleToVolunteer !== false);
+
     // Avertissements actifs non encore lus — voir
     // volunteerDisciplineController.js. Affichés en bandeau "Mon espace"
     // (src/components/volunteer/Dashboard.jsx), disparaissent une fois

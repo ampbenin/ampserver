@@ -89,6 +89,15 @@ const VolunteerSchema = new mongoose.Schema(
           default: "Non disponible",
         },
         uploadedAt: { type: Date, default: Date.now },
+        // Contrôle admin (2026-09-11) — une attestation générée est
+        // immédiatement visible/téléchargeable dans "Mon espace" du
+        // volontaire par défaut, mais un ADMIN/EDITOR peut la masquer sans
+        // la supprimer (ex : le temps de vérifier des infos, ou avant une
+        // remise officielle) via POST .../visibility (voir
+        // certificateController.js). Quand false, l'attestation est
+        // totalement retirée de la réponse de "Mon espace" (volunteerAuthController.js#me)
+        // — le volontaire ne la voit pas du tout, pas juste un lien désactivé.
+        visibleToVolunteer: { type: Boolean, default: true },
       },
     ],
   },
