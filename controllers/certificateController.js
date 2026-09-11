@@ -6,6 +6,16 @@ const { generateCertificateImage } = require("../utils/certificateGenerator");
 const { PDFDocument } = require("pdf-lib");
 const sharp = require("sharp");
 const streamifier = require("streamifier");
+const resend = require("../utils/resendMailer");
+const { renderBrandedEmail, escapeHtml } = require("../utils/emailTemplates");
+
+// Même adresse/charte que volunteerAuthController.js (domaine Resend
+// vérifié — voir son commentaire pour le détail).
+const RESEND_FROM = "VOLONTAIRE AMP BENIN <candidatures@ampbenin.org>";
+const AMP_BRAND = {
+  brandLabel: "AMP BÉNIN — Volontariat",
+  footerText: "AMP BÉNIN — Programme de volontariat · Ceci est un message automatique.",
+};
 
 // Même pattern que volunteerAuthController.js / volunteerApplicationController.js
 // / gestionamp/authController.js : domaine du frontend configurable via
@@ -397,10 +407,50 @@ const resetCertificates = async (req, res) => {
 // `visible` détermine l'action pour TOUS les volunteerIds donnés en un seul
 // appel (pas de mélange activer/désactiver dans le même appel — l'UI fait
 // deux boutons distincts plutôt qu'un état par ligne à combiner).
+// Email de notification "attestation disponible" — envoyé UNIQUEMENT quand
+// on active la visibilité (jamais en désactivant, ça n'aurait pas de sens),
+// et uniquement si l'appelant l'a explicitement demandé (sendEmail:true,
+// voir setCertificateVisibility). Best-effort : une erreur d'envoi ne doit
+// jamais faire échouer la mise à jour de visibilité elle-même.
+async function sendCertificateAvailableEmail(volunteer, programTitle) {
+  if (!volunteer.email) return;
+  const loginUrl = `${FRONTEND_BASE}/mon-espace/login`;
+  const title = "🎓 Votre attestation est disponible !";
+  const text =
+    `Bonjour ${volunteer.prenom},\n\n` +
+    `Félicitations et merci pour votre engagement dans le cadre de "${programTitle}" ! ` +
+    `Votre attestation de fin de mission est maintenant disponible.\n\n` +
+    `Pour la télécharger : connectez-vous à votre espace volontaire (${loginUrl}), ` +
+    `puis rendez-vous dans la section "Mes attestations" de votre profil.\n\n` +
+    `Toute l'équipe AMP BÉNIN vous remercie chaleureusement pour votre contribution.`;
+
+  try {
+    await resend.emails.send({
+      from: RESEND_FROM,
+      to: volunteer.email,
+      subject: `${title} — AMP BÉNIN`,
+      text,
+      html: renderBrandedEmail({
+        ...AMP_BRAND,
+        title,
+        bodyHtml: [
+          `<p>Bonjour ${escapeHtml(volunteer.prenom)},</p>`,
+          `<p>Félicitations et merci pour votre engagement dans le cadre de <strong>${escapeHtml(programTitle)}</strong> ! Votre attestation de fin de mission est maintenant disponible.</p>`,
+          `<p>Toute l'équipe AMP BÉNIN vous remercie chaleureusement pour votre contribution et votre sérieux tout au long de la mission.</p>`,
+          `<p style="text-align:center;margin:28px 0;"><a href="${loginUrl}" style="display:inline-block;background:#1B4332;color:#FFFFFF;text-decoration:none;padding:12px 28px;border-radius:8px;font-weight:700;">Me connecter à mon espace</a></p>`,
+          `<p style="font-size:13px;color:#7A7A7A;">Une fois connecté(e), retrouvez votre attestation dans la section "Mes attestations" de votre profil.</p>`,
+        ].join(""),
+      }),
+    });
+  } catch (mailError) {
+    console.error("❌ Erreur envoi email attestation disponible :", mailError.message);
+  }
+}
+
 const setCertificateVisibility = async (req, res) => {
   try {
     const { programId } = req.params;
-    const { volunteerIds, visible } = req.body || {};
+    const { volunteerIds, visible, sendEmail } = req.body || {};
     if (!Array.isArray(volunteerIds) || volunteerIds.length === 0) {
       return res.status(400).json({ message: "volunteerIds requis (au moins un volontaire)" });
     }
@@ -421,16 +471,22 @@ const setCertificateVisibility = async (req, res) => {
     });
 
     let updatedCount = 0;
+    let emailedCount = 0;
     for (const volunteer of volunteers) {
       const attestation = volunteer.attestations.find((a) => a.programId.toString() === program._id.toString());
       if (attestation && attestation.visibleToVolunteer !== visible) {
         attestation.visibleToVolunteer = visible;
         await volunteer.save();
         updatedCount++;
+
+        if (visible && sendEmail) {
+          await sendCertificateAvailableEmail(volunteer, program.title);
+          emailedCount++;
+        }
       }
     }
 
-    res.status(200).json({ message: "Visibilité mise à jour", updated: updatedCount });
+    res.status(200).json({ message: "Visibilité mise à jour", updated: updatedCount, emailed: emailedCount });
   } catch (error) {
     console.error("❌ setCertificateVisibility erreur :", error);
     res.status(500).json({ message: error.message || "Erreur serveur" });
