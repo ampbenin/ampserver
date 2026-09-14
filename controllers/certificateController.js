@@ -287,7 +287,17 @@ function buildAttestationFilename(volunteerName, programTitle) {
 function toAsciiSafe(str) {
   return String(str || "")
     .normalize("NFD")
-    .replace(/[̀-ͯ]/g, "");
+    .replace(/[̀-ͯ]/g, "") // diacritiques (é→e, è→e, à→a...)
+    // Cloudinary rejette (400) fl_attachment dès qu'un caractère hors
+    // lettres/chiffres/espaces/tirets apparaît dans sa valeur — testé en
+    // direct : une apostrophe (fréquente dans les noms béninois, ex :
+    // "N'déto") casse la requête MÊME correctement percent-encodée
+    // (%27...), tout comme les accents (voir plus haut). Ne garde donc que
+    // ce jeu de caractères sûr, quitte à perdre un peu de ponctuation dans
+    // le nom suggéré au téléchargement.
+    .replace(/[^a-zA-Z0-9 -]/g, "")
+    .replace(/\s+/g, " ")
+    .trim();
 }
 function buildDownloadUrl(publicId, version, filename) {
   return cloudinary.url(publicId, {
