@@ -12,6 +12,13 @@ const JobPostingSchema = new mongoose.Schema(
     category: { type: String, default: "" },
     location: { type: String, default: "" },
     applyUrl: { type: String, required: true },
+    // Lien de candidature à proprement parler (formulaire, email,
+    // portail externe...) — distinct de applyUrl, qui malgré son nom sert
+    // en réalité de lien vers le document/TDR (voir JobsCarousel.jsx,
+    // boutons "Aperçu"/"Télécharger"). Optionnel : les offres déjà
+    // publiées avant cet ajout n'en ont pas encore, le bouton "Postuler
+    // ici" ne s'affiche alors simplement pas (voir JobsCarousel.jsx).
+    applicationLink: { type: String, default: "" },
     deadline: { type: Date, default: null },
     order: { type: Number, default: 0 },
 
