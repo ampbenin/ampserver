@@ -160,6 +160,10 @@ app.use("/api/cms/jobs", require("./routes/cms/jobs"));
 app.use("/api/cms/campaigns", require("./routes/cms/campaigns"));
 app.use("/api/cms/media", require("./routes/cms/media"));
 
+// Recrutement : candidatures aux offres (JobPosting) + base du personnel
+app.use("/api/job-applications", require("./routes/jobApplicationRoute"));
+app.use("/api/personnel", require("./routes/personnelRoute"));
+
 // ===================================================
 // 🎓 NUMSAL (plateforme d'apprentissage en ligne, sous-domaine dédié)
 // ===================================================

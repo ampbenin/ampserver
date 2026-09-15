@@ -5,6 +5,7 @@
  */
 
 const mongoose = require("mongoose");
+const ApplicationFieldSchema = require("../shared/applicationFieldSchema");
 
 const JobPostingSchema = new mongoose.Schema(
   {
@@ -21,6 +22,15 @@ const JobPostingSchema = new mongoose.Schema(
     applicationLink: { type: String, default: "" },
     deadline: { type: Date, default: null },
     order: { type: Number, default: 0 },
+
+    // Formulaire de candidature interne (voir models/jobApplication.js) —
+    // quand fields n'est pas vide, "Postuler ici" (JobsCarousel.jsx) ouvre
+    // ce formulaire sur le site au lieu du lien externe applicationLink,
+    // qui reste un simple repli pour les offres pas encore configurées.
+    applicationForm: {
+      fields: { type: [ApplicationFieldSchema], default: [] },
+      estimatedDuration: { type: String, default: "" },
+    },
 
     status: {
       type: String,
