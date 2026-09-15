@@ -183,6 +183,10 @@ const validateApplicationResponses = (fields, responses) => {
         return `"${field.label}" accepte au maximum ${v.maxImages} photo(s)`;
       }
     }
+
+    if (field.type === "FILE" && typeof value !== "string") {
+      return `"${field.label}" doit être un fichier valide`;
+    }
   }
   return null;
 };

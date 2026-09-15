@@ -17,6 +17,8 @@ const getPersonnelModel = require("../models/personnel");
 const resend = require("../utils/resendMailer");
 const { renderBrandedEmail, escapeHtml } = require("../utils/emailTemplates");
 const { validateApplicationResponses } = require("../utils/applicationFormLogic");
+const cloudinary = require("../utils/cloudinary");
+const streamifier = require("streamifier");
 
 const RESEND_FROM = "RECRUTEMENT AMP BENIN <candidatures@ampbenin.org>";
 const AMP_BRAND = {
@@ -114,6 +116,37 @@ exports.applyToJob = async (req, res, next) => {
     if (error.code === 11000) {
       return res.status(409).json({ message: "Vous avez déjà postulé à cette offre" });
     }
+    next(error);
+  }
+};
+
+/* -------------------- Public : upload d'une pièce jointe (champ FILE) -------------------- */
+/* Même schéma que numsal/testimonialController.js#uploadPhoto (point d'entrée
+   public sans compte, protégé par authLimiter sur la route + un plafond de
+   taille au niveau multer) — resource_type "raw" (comme
+   certificateController.js#uploadFromBuffer pour les PDF générés) plutôt que
+   "auto" : "auto" fait interpréter/valider le fichier par Cloudinary (un PDF
+   est alors traité comme une image potentiellement rasterisable et rejeté
+   s'il n'est pas strictement conforme), alors qu'un champ FILE doit accepter
+   tel quel n'importe quel document (CV en PDF/DOCX...), sans validation de
+   contenu. La limite de taille/type propre à CE champ
+   (validation.maxFileSizeMB/allowedFileTypes) est imposée côté client avant
+   l'appel, comme maxImages pour les champs IMAGE ailleurs dans ce projet —
+   pas revérifiée ici, même niveau de garantie que le reste de ce schéma. */
+exports.uploadApplicationFile = async (req, res, next) => {
+  try {
+    if (!req.file) return res.status(400).json({ message: "Aucun fichier reçu" });
+
+    const uploaded = await new Promise((resolve, reject) => {
+      const uploadStream = cloudinary.uploader.upload_stream(
+        { folder: "recruitment/applications", resource_type: "raw" },
+        (error, result) => (error ? reject(error) : resolve(result))
+      );
+      streamifier.createReadStream(req.file.buffer).pipe(uploadStream);
+    });
+
+    res.status(201).json({ url: uploaded.secure_url, fileName: req.file.originalname });
+  } catch (error) {
     next(error);
   }
 };
