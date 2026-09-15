@@ -14,6 +14,22 @@ router.post("/admin", ...requireEditor, ctrl.create);
 router.put("/admin/:id", ...requireEditor, ctrl.update);
 router.delete("/admin/:id", ...requireEditor, ctrl.remove);
 
-router.get("/", ctrl.listPublished);
+// Liste publique : ne sert pas les offres dont la date limite est dépassée
+// (le CRUD admin, lui, continue de toutes les montrer — une offre expirée
+// n'est pas supprimée automatiquement, juste retirée de la page publique).
+router.get("/", async (req, res, next) => {
+  try {
+    const Model = getJobPostingModel();
+    const startOfToday = new Date();
+    startOfToday.setHours(0, 0, 0, 0);
+    const items = await Model.find({
+      status: "PUBLISHED",
+      $or: [{ deadline: null }, { deadline: { $gte: startOfToday } }],
+    }).sort({ order: 1, createdAt: -1 });
+    res.json({ success: true, items });
+  } catch (error) {
+    next(error);
+  }
+});
 
 module.exports = router;
