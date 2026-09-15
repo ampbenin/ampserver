@@ -66,6 +66,8 @@ exports.getApplicationForm = async (req, res, next) => {
     res.json({
       title: job.title,
       estimatedDuration: job.applicationForm?.estimatedDuration || "",
+      backgroundColor: job.applicationForm?.backgroundColor || "",
+      textColor: job.applicationForm?.textColor || "",
       fields: ensureBuiltinFields(job.applicationForm?.fields),
     });
   } catch (error) {

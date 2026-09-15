@@ -30,6 +30,13 @@ const JobPostingSchema = new mongoose.Schema(
     applicationForm: {
       fields: { type: [ApplicationFieldSchema], default: [] },
       estimatedDuration: { type: String, default: "" },
+      // Couleur de fond / couleur de texte du formulaire plein écran vu par
+      // le candidat (JobApplicationForm.jsx) — décision utilisateur
+      // 2026-09-16 : par offre, pas une seule couleur de marque partagée.
+      // Vide = couleurs par défaut (vert AMP Bénin / blanc), voir
+      // jobApplicationController.js#getApplicationForm.
+      backgroundColor: { type: String, default: "" },
+      textColor: { type: String, default: "" },
     },
 
     status: {
