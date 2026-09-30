@@ -1,18 +1,25 @@
 const express = require("express");
 const router = express.Router();
-const makeSimpleCrud = require("../../controllers/cms/makeSimpleCrud");
 const getJobPostingModel = require("../../models/cms/JobPosting");
 const authMiddleware = require("../../middlewares/gestionamp/authMiddleware");
 const roleMiddleware = require("../../middlewares/gestionamp/roleMiddleware");
 
-const ctrl = makeSimpleCrud(getJobPostingModel, "Offre");
+// Remplace makeSimpleCrud pour ce modèle : une offre porte des droits
+// délégués par personne (staffAccess) qui nécessitent une vérification par
+// item, voir controllers/cms/jobPostingsController.js. Le contrôleur
+// distingue ADMIN (create/remove/setStaffAccess) de "canEditForm" (update) —
+// roleMiddleware ici ne fait que garder EC/IS/SUPERVISEUR/PARTENAIRE hors
+// du panneau admin, même découpage que routes/volunteerProgramRoute.js.
+const ctrl = require("../../controllers/cms/jobPostingsController");
 const requireEditor = [authMiddleware, roleMiddleware("ADMIN", "EDITOR")];
+const requireAdminOnly = [authMiddleware, roleMiddleware("ADMIN")];
 
 router.get("/admin", ...requireEditor, ctrl.adminList);
 router.get("/admin/:id", ...requireEditor, ctrl.adminGetById);
 router.post("/admin", ...requireEditor, ctrl.create);
 router.put("/admin/:id", ...requireEditor, ctrl.update);
 router.delete("/admin/:id", ...requireEditor, ctrl.remove);
+router.patch("/admin/:id/staff-access", ...requireAdminOnly, ctrl.setStaffAccess);
 
 // Liste publique : ne sert pas les offres dont la date limite est dépassée
 // (le CRUD admin, lui, continue de toutes les montrer — une offre expirée

@@ -45,6 +45,25 @@ const JobPostingSchema = new mongoose.Schema(
       default: "DRAFT",
     },
 
+    // Accès délégué par offre (décision utilisateur, 2026-09-30) — un
+    // compte EDITOR n'a plus d'accès total à toutes les offres par défaut
+    // (même bascule que VolunteerProgram.editorIds le 2026-08-17) : il ne
+    // gère que les offres où il apparaît ici, avec exactement les droits
+    // cochés. 3 booléens indépendants et cumulables (pas des rôles
+    // exclusifs) — voir controllers/cms/jobPostingsController.js#getJobAccess :
+    // canReviewApplications implique canViewApplications. Créer/supprimer
+    // une offre et supprimer une candidature ne sont volontairement PAS
+    // délégables ici, toujours réservés à ADMIN.
+    staffAccess: [
+      {
+        _id: false,
+        userId: { type: mongoose.Schema.Types.ObjectId, ref: "GestionAmpUser", required: true },
+        canEditForm: { type: Boolean, default: false },
+        canViewApplications: { type: Boolean, default: false },
+        canReviewApplications: { type: Boolean, default: false },
+      },
+    ],
+
     updatedBy: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "GestionAmpUser",

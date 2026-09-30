@@ -6,9 +6,12 @@
  * (aucune admission automatique pour une offre d'emploi), pas de
  * groupes/bulk (non demandés).
  *
- * Autorisation staff : ADMIN/EDITOR en bloc, comme routes/cms/jobs.js —
- * JobPosting n'a pas de notion d'affectation par utilisateur (contrairement
- * à VolunteerProgram/canReviewProgram), donc pas de vérification par offre.
+ * Autorisation staff : par offre, via JobPosting.staffAccess (décision
+ * utilisateur, 2026-09-30 — voir controllers/cms/jobPostingsController.js#getJobAccess,
+ * même esprit que canReviewProgram pour le volontariat mais plus
+ * granulaire) : canViewApplications pour lister, canReviewApplications pour
+ * faire avancer le pipeline (review/retain/reject), suppression toujours
+ * réservée à ADMIN (jamais délégable).
  */
 
 const getJobPostingModel = require("../models/cms/JobPosting");
@@ -19,6 +22,7 @@ const { renderBrandedEmail, escapeHtml } = require("../utils/emailTemplates");
 const { validateApplicationResponses } = require("../utils/applicationFormLogic");
 const cloudinary = require("../utils/cloudinary");
 const streamifier = require("streamifier");
+const { getJobAccess } = require("./cms/jobPostingsController");
 
 const RESEND_FROM = "RECRUTEMENT AMP BENIN <candidatures@ampbenin.org>";
 const AMP_BRAND = {
@@ -157,6 +161,13 @@ exports.listApplications = async (req, res, next) => {
     const { jobPostingId, status, search } = req.query;
     if (!jobPostingId) return res.status(400).json({ message: "jobPostingId requis" });
 
+    const JobPosting = getJobPostingModel();
+    const job = await JobPosting.findById(jobPostingId);
+    if (!job) return res.status(404).json({ message: "Offre introuvable" });
+    if (!getJobAccess(job, req.user).canViewApplications) {
+      return res.status(403).json({ message: "Vous n'êtes pas autorisé à consulter les candidatures de cette offre" });
+    }
+
     const query = { jobPostingId };
     if (status) query.status = status;
 
@@ -184,6 +195,13 @@ exports.moveToReview = async (req, res, next) => {
     const Application = getJobApplicationModel();
     const application = await Application.findById(req.params.id);
     if (!application) return res.status(404).json({ message: "Candidature introuvable" });
+
+    const JobPosting = getJobPostingModel();
+    const job = await JobPosting.findById(application.jobPostingId);
+    if (!job || !getJobAccess(job, req.user).canReviewApplications) {
+      return res.status(403).json({ message: "Vous n'êtes pas autorisé à étudier les candidatures de cette offre" });
+    }
+
     if (application.status !== "RECEIVED") {
       return res.status(409).json({ message: "Cette candidature n'est plus au statut \"Reçue\"" });
     }
@@ -206,6 +224,12 @@ exports.updateNotes = async (req, res, next) => {
     const Application = getJobApplicationModel();
     const application = await Application.findById(req.params.id);
     if (!application) return res.status(404).json({ message: "Candidature introuvable" });
+
+    const JobPosting = getJobPostingModel();
+    const job = await JobPosting.findById(application.jobPostingId);
+    if (!job || !getJobAccess(job, req.user).canReviewApplications) {
+      return res.status(403).json({ message: "Vous n'êtes pas autorisé à étudier les candidatures de cette offre" });
+    }
 
     application.staffNotes = req.body?.staffNotes || "";
     await application.save();
@@ -230,6 +254,9 @@ exports.retainApplication = async (req, res, next) => {
 
     const JobPosting = getJobPostingModel();
     const job = await JobPosting.findById(application.jobPostingId);
+    if (!job || !getJobAccess(job, req.user).canReviewApplications) {
+      return res.status(403).json({ message: "Vous n'êtes pas autorisé à étudier les candidatures de cette offre" });
+    }
 
     const Personnel = getPersonnelModel();
     let personnel = await Personnel.findOne({ email: application.applicantEmail });
@@ -270,6 +297,13 @@ exports.rejectApplication = async (req, res, next) => {
     const Application = getJobApplicationModel();
     const application = await Application.findById(req.params.id);
     if (!application) return res.status(404).json({ message: "Candidature introuvable" });
+
+    const JobPosting = getJobPostingModel();
+    const job = await JobPosting.findById(application.jobPostingId);
+    if (!job || !getJobAccess(job, req.user).canReviewApplications) {
+      return res.status(403).json({ message: "Vous n'êtes pas autorisé à étudier les candidatures de cette offre" });
+    }
+
     if (application.status === "RETAINED") {
       return res.status(409).json({ message: "Cette candidature est déjà retenue" });
     }
@@ -285,9 +319,14 @@ exports.rejectApplication = async (req, res, next) => {
   }
 };
 
-/* -------------------- Staff : supprimer une candidature -------------------- */
+/* -------------------- ADMIN uniquement : supprimer une candidature -------------------- */
+/* Jamais délégable via staffAccess (décision utilisateur) — même une
+   personne avec canReviewApplications ne peut pas supprimer. */
 exports.deleteApplication = async (req, res, next) => {
   try {
+    if (req.user.role !== "ADMIN") {
+      return res.status(403).json({ message: "Seul un ADMIN peut supprimer une candidature" });
+    }
     const Application = getJobApplicationModel();
     const application = await Application.findById(req.params.id);
     if (!application) return res.status(404).json({ message: "Candidature introuvable" });
