@@ -49,10 +49,13 @@ exports.createUser = async (req, res) => {
       institutionSpecialiseeId,
     } = req.body;
 
-    // Vérification du rôle autorisé
-    if (!["EC", "IS", "EDITOR", "SUPERVISEUR", "PARTENAIRE"].includes(role)) {
+    // Vérification du rôle autorisé — ADMIN inclus depuis 2026-09-30 (retour
+    // utilisateur : "on ne donne pas le droit ADMIN aux gens alors qu'on
+    // doit donner ADMIN aussi"). updateUser (édition) l'acceptait déjà pour
+    // un compte existant ; seule la création via ce formulaire l'excluait.
+    if (!["ADMIN", "EC", "IS", "EDITOR", "SUPERVISEUR", "PARTENAIRE"].includes(role)) {
       return res.status(400).json({
-        message: "Seuls les rôles EC, IS, EDITOR, SUPERVISEUR et PARTENAIRE peuvent être créés",
+        message: "Rôle invalide",
       });
     }
 

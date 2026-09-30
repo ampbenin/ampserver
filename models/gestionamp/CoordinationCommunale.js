@@ -27,6 +27,14 @@ const CoordinationCommunaleSchema = new mongoose.Schema(
       type: String,
       default: "",
     },
+
+    // Désactiver plutôt que supprimer quand des comptes/activités y sont
+    // encore rattachés (décision utilisateur, 2026-09-30 : "il faut un
+    // moyen pour vérifier les données et on peut supprimer. Ou désactivé")
+    // — la suppression reste bloquée tant que des données existent (voir
+    // makeSpaceCrud.js), la désactivation retire l'espace des sélecteurs
+    // sans perdre l'historique.
+    isActive: { type: Boolean, default: true },
   },
   {
     timestamps: true,
