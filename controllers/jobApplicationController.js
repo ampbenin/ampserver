@@ -239,7 +239,48 @@ exports.updateNotes = async (req, res, next) => {
   }
 };
 
-/* -------------------- Staff : retenir une candidature (→ Personnel) -------------------- */
+/* -------------------- Interne : crée/relie le Personnel et finalise RETAINED -------------------- */
+/* Partagé entre retainApplication (ADMIN, direct) et validateRetain (ADMIN,
+   après proposition d'un non-ADMIN) — seul chemin qui crée réellement la
+   fiche Personnel et envoie l'email, jamais à l'étape PENDING_VALIDATION. */
+async function finalizeRetain(application, job, { category, notes }, adminId) {
+  const Personnel = getPersonnelModel();
+  let personnel = await Personnel.findOne({ email: application.applicantEmail });
+  if (!personnel) {
+    personnel = await Personnel.create({
+      firstName: application.applicantFirstName,
+      lastName: application.applicantLastName,
+      email: application.applicantEmail,
+      phone: application.applicantPhone || "",
+      category: category.trim(),
+      notes: notes || "",
+      sourceJobPostingId: application.jobPostingId,
+      sourceApplicationId: application._id,
+      createdBy: adminId,
+    });
+  } else {
+    personnel.category = category.trim();
+    if (notes) personnel.notes = notes;
+    await personnel.save();
+  }
+
+  application.status = "RETAINED";
+  application.reviewedBy = adminId;
+  application.reviewedAt = new Date();
+  application.personnelId = personnel._id;
+  await application.save();
+
+  await sendRetainedEmail(application, job);
+  return personnel;
+}
+
+/* -------------------- Staff : retenir une candidature -------------------- */
+/* Un ADMIN retient directement (comportement inchangé : Personnel +
+   RETAINED + email immédiats). Un non-ADMIN (affecté via staffAccess avec
+   canReviewApplications — EDITOR/EC/IS/SUPERVISEUR/PARTENAIRE) ne fait que
+   PROPOSER : la candidature passe à PENDING_VALIDATION, rien n'est envoyé
+   ni créé tant qu'un ADMIN n'a pas validé (voir validateRetain) — décision
+   utilisateur, 2026-09-30 : "il faut un ADMIN pour valider le traitement". */
 exports.retainApplication = async (req, res, next) => {
   try {
     const { category, notes } = req.body;
@@ -251,6 +292,9 @@ exports.retainApplication = async (req, res, next) => {
     if (application.status === "RETAINED") {
       return res.status(409).json({ message: "Cette candidature est déjà retenue" });
     }
+    if (application.status === "PENDING_VALIDATION") {
+      return res.status(409).json({ message: "Cette candidature est déjà en attente de validation ADMIN" });
+    }
 
     const JobPosting = getJobPostingModel();
     const job = await JobPosting.findById(application.jobPostingId);
@@ -258,34 +302,50 @@ exports.retainApplication = async (req, res, next) => {
       return res.status(403).json({ message: "Vous n'êtes pas autorisé à étudier les candidatures de cette offre" });
     }
 
-    const Personnel = getPersonnelModel();
-    let personnel = await Personnel.findOne({ email: application.applicantEmail });
-    if (!personnel) {
-      personnel = await Personnel.create({
-        firstName: application.applicantFirstName,
-        lastName: application.applicantLastName,
-        email: application.applicantEmail,
-        phone: application.applicantPhone || "",
-        category: category.trim(),
-        notes: notes || "",
-        sourceJobPostingId: application.jobPostingId,
-        sourceApplicationId: application._id,
-        createdBy: req.user.id,
-      });
-    } else {
-      personnel.category = category.trim();
-      if (notes) personnel.notes = notes;
-      await personnel.save();
+    if (req.user.role === "ADMIN") {
+      const personnel = await finalizeRetain(application, job, { category, notes }, req.user.id);
+      return res.json({ message: "Candidature retenue, ajoutée au personnel", item: application, personnel });
     }
 
-    application.status = "RETAINED";
-    application.reviewedBy = req.user.id;
-    application.reviewedAt = new Date();
-    application.personnelId = personnel._id;
+    application.status = "PENDING_VALIDATION";
+    application.proposedCategory = category.trim();
+    application.proposedNotes = notes || "";
+    application.proposedBy = req.user.id;
+    application.proposedAt = new Date();
     await application.save();
 
-    await sendRetainedEmail(application, job);
-    res.json({ message: "Candidature retenue, ajoutée au personnel", item: application, personnel });
+    res.json({ message: "Rétention proposée — en attente de validation par un ADMIN", item: application });
+  } catch (error) {
+    next(error);
+  }
+};
+
+/* -------------------- ADMIN uniquement : valider une proposition de rétention -------------------- */
+/* category/notes optionnels dans le body pour permettre à l'ADMIN de
+   corriger la proposition avant validation ; sinon reprend telle quelle
+   la proposition du non-ADMIN. */
+exports.validateRetain = async (req, res, next) => {
+  try {
+    if (req.user.role !== "ADMIN") {
+      return res.status(403).json({ message: "Seul un ADMIN peut valider une rétention" });
+    }
+
+    const Application = getJobApplicationModel();
+    const application = await Application.findById(req.params.id);
+    if (!application) return res.status(404).json({ message: "Candidature introuvable" });
+    if (application.status !== "PENDING_VALIDATION") {
+      return res.status(409).json({ message: "Cette candidature n'est pas en attente de validation" });
+    }
+
+    const category = req.body?.category?.trim() || application.proposedCategory;
+    const notes = req.body?.notes ?? application.proposedNotes;
+    if (!category) return res.status(400).json({ message: "Catégorie d'agent requise" });
+
+    const JobPosting = getJobPostingModel();
+    const job = await JobPosting.findById(application.jobPostingId);
+
+    const personnel = await finalizeRetain(application, job, { category, notes }, req.user.id);
+    res.json({ message: "Rétention validée, candidat ajouté au personnel", item: application, personnel });
   } catch (error) {
     next(error);
   }

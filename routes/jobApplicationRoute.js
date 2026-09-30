@@ -37,6 +37,7 @@ router.get("/", ...requireStaff, ctrl.listApplications);
 router.patch("/:id/review", ...requireStaff, ctrl.moveToReview);
 router.patch("/:id/notes", ...requireStaff, ctrl.updateNotes);
 router.patch("/:id/retain", ...requireStaff, ctrl.retainApplication);
+router.patch("/:id/validate-retain", ...requireAdminOnly, ctrl.validateRetain);
 router.patch("/:id/reject", ...requireStaff, ctrl.rejectApplication);
 router.delete("/:id", ...requireAdminOnly, ctrl.deleteApplication);
 
