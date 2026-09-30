@@ -7,7 +7,11 @@ const authMiddleware = require("../middlewares/gestionamp/authMiddleware");
 const roleMiddleware = require("../middlewares/gestionamp/roleMiddleware");
 const { authLimiter } = require("../config/rateLimit");
 
-const requireStaff = [authMiddleware, roleMiddleware("ADMIN", "EDITOR")];
+// Affectable à n'importe quel rôle sauf ADMIN depuis 2026-09-30 (voir
+// routes/cms/jobs.js) : le niveau route ne garde que "authentifié", la
+// vérification fine par offre (getJobAccess) se fait dans le contrôleur.
+const requireStaff = [authMiddleware];
+const requireAdminOnly = [authMiddleware, roleMiddleware("ADMIN")];
 
 // Point d'entrée public sans compte (comme numsal/testimonialRoutes.js
 // #upload-photo) — pas de fileFilter mimetype ici : un champ FILE accepte
@@ -34,6 +38,6 @@ router.patch("/:id/review", ...requireStaff, ctrl.moveToReview);
 router.patch("/:id/notes", ...requireStaff, ctrl.updateNotes);
 router.patch("/:id/retain", ...requireStaff, ctrl.retainApplication);
 router.patch("/:id/reject", ...requireStaff, ctrl.rejectApplication);
-router.delete("/:id", ...requireStaff, ctrl.deleteApplication);
+router.delete("/:id", ...requireAdminOnly, ctrl.deleteApplication);
 
 module.exports = router;

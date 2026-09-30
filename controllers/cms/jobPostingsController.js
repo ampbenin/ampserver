@@ -6,7 +6,8 @@
  * utilisateur 2026-09-30) qui nécessitent une vérification par item, chose
  * que le CRUD générique ne fait pas du tout.
  *
- * Un compte EDITOR n'a plus d'accès total à toutes les offres par défaut —
+ * Tout compte non-ADMIN (EDITOR, mais aussi EC/IS/SUPERVISEUR/PARTENAIRE
+ * depuis 2026-09-30) n'a plus d'accès total à toutes les offres par défaut —
  * il ne gère que celles où il apparaît dans staffAccess, avec exactement
  * les droits cochés (même bascule que VolunteerProgram.editorIds le
  * 2026-08-17, voir controllers/volunteerProgramController.js#canReviewProgram,
@@ -166,8 +167,12 @@ exports.setStaffAccess = async (req, res, next) => {
     const User = getUserModel();
     const targetUser = await User.findById(userId);
     if (!targetUser) return res.status(404).json({ message: "Compte introuvable" });
-    if (targetUser.role !== "EDITOR") {
-      return res.status(400).json({ message: "Ce compte n'a pas le rôle EDITOR" });
+    // Tout rôle sauf ADMIN est affectable (décision utilisateur, 2026-09-30
+    // — élargi depuis EDITOR seul) : EC, IS, SUPERVISEUR, PARTENAIRE aussi,
+    // via leur propre tableau de bord (voir RecruitmentAssignedPanel.jsx),
+    // pas seulement /admin/dashboard.
+    if (targetUser.role === "ADMIN") {
+      return res.status(400).json({ message: "Un compte ADMIN a déjà accès à tout, inutile de l'affecter" });
     }
 
     const hasAny = !!canEditForm || !!canViewApplications || !!canReviewApplications;
