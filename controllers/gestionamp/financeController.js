@@ -74,25 +74,32 @@ exports.getFinances = async (req, res) => {
 /**
  * @route GET /gestionamp/api/finances/summary
  * @desc Résumé financier (totaux + solde)
+ *
+ * Bug corrigé (2026-09-30) : renvoyait `totalIncome`/`totalExpense`
+ * (singulier) alors que les 3 widgets qui consomment cet endpoint
+ * (FinanceGlobalSummary.jsx ADMIN, FinanceSummary.jsx EC,
+ * InstitutionFinanceSummary.jsx IS) lisent tous `totalIncomes`/
+ * `totalExpenses` (pluriel) — masqué jusqu'ici par le bug de loader lazy
+ * qui empêchait cet endpoint de répondre quoi que ce soit.
  */
 exports.getFinanceSummary = async (req, res) => {
   try {
     const Finance = getFinanceModel();
     const finances = await Finance.find(req.spaceFilter);
 
-    const totalIncome = finances
+    const totalIncomes = finances
       .filter((f) => f.type === "INCOME")
       .reduce((sum, f) => sum + f.amount, 0);
 
-    const totalExpense = finances
+    const totalExpenses = finances
       .filter((f) => f.type === "EXPENSE")
       .reduce((sum, f) => sum + f.amount, 0);
 
-    const balance = totalIncome - totalExpense;
+    const balance = totalIncomes - totalExpenses;
 
     res.json({
-      totalIncome,
-      totalExpense,
+      totalIncomes,
+      totalExpenses,
       balance,
     });
   } catch (error) {
