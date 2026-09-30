@@ -1,9 +1,16 @@
 /**
  * Contrôleur Activity
  * Multi-tenant strict via spaceMiddleware
+ *
+ * Bug corrigé (2026-09-30, audit "gestion des IS") : ce fichier appelait
+ * `Activity.create()`/`.find()` directement sur le module importé, qui est
+ * en réalité le loader lazy `getActivityModel` (jamais invoqué) — chaque
+ * appel échouait ("Activity.create is not a function"), cassant
+ * intégralement la création/liste/soumission/validation d'activités pour
+ * EC ET IS.
  */
 
-const Activity = require("../../models/gestionamp/Activity");
+const getActivityModel = require("../../models/gestionamp/Activity");
 
 /**
  * @route POST /gestionamp/api/activities
@@ -11,6 +18,7 @@ const Activity = require("../../models/gestionamp/Activity");
  */
 exports.createActivity = async (req, res) => {
   try {
+    const Activity = getActivityModel();
     const activity = await Activity.create({
       ...req.body,
       ...req.spaceFilter,
@@ -32,6 +40,7 @@ exports.createActivity = async (req, res) => {
  */
 exports.getActivities = async (req, res) => {
   try {
+    const Activity = getActivityModel();
     const activities = await Activity.find(req.spaceFilter)
       .populate("createdBy", "name role")
       .sort({ createdAt: -1 });
@@ -51,6 +60,7 @@ exports.getActivities = async (req, res) => {
  */
 exports.submitActivity = async (req, res) => {
   try {
+    const Activity = getActivityModel();
     const activity = await Activity.findOne({
       _id: req.params.id,
       ...req.spaceFilter,
@@ -78,6 +88,7 @@ exports.submitActivity = async (req, res) => {
  */
 exports.validateActivity = async (req, res) => {
   try {
+    const Activity = getActivityModel();
     const activity = await Activity.findById(req.params.id);
 
     if (!activity) {

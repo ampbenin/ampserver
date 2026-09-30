@@ -140,6 +140,13 @@ app.use(
   require("./routes/gestionamp/reportRoutes")
 );
 
+// Statistiques des tableaux de bord (ADMIN/EC/IS) — n'existait pas, voir
+// controllers/gestionamp/dashboardController.js
+app.use(
+  "/gestionamp/api/dashboard",
+  require("./routes/gestionamp/dashboardRoutes")
+);
+
 // 🌐 API publique AMP (lecture seule)
 const { publicApiLimiter } = require("./config/rateLimit");
 app.use(

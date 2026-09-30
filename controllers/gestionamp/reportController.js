@@ -1,4 +1,7 @@
-const Report = require("../../models/gestionamp/Report");
+// Bug corrigé (2026-09-30, audit "gestion des IS") : même erreur que
+// activityController.js/financeController.js — `Report` était le loader
+// lazy jamais invoqué, jamais le modèle Mongoose lui-même.
+const getReportModel = require("../../models/gestionamp/Report");
 const { generateReportData } = require("../../utils/gestionamp/reportGenerator");
 
 /**
@@ -7,6 +10,7 @@ const { generateReportData } = require("../../utils/gestionamp/reportGenerator")
 exports.generateReport = async (req, res) => {
   try {
     const { year } = req.body;
+    const Report = getReportModel();
 
     const report = await Report.create({
       year,
@@ -24,6 +28,7 @@ exports.generateReport = async (req, res) => {
  * Lister les rapports (par espace)
  */
 exports.getReports = async (req, res) => {
+  const Report = getReportModel();
   const reports = await Report.find(req.spaceFilter).sort({ year: -1 });
   res.json(reports);
 };
@@ -32,6 +37,7 @@ exports.getReports = async (req, res) => {
  * Validation ADMIN
  */
 exports.validateReport = async (req, res) => {
+  const Report = getReportModel();
   const report = await Report.findById(req.params.id);
 
   if (!report) {
@@ -52,6 +58,7 @@ exports.validateReport = async (req, res) => {
  * Accessible uniquement si VALIDÉ et dans le bon espace
  */
 exports.downloadReport = async (req, res) => {
+  const Report = getReportModel();
   const report = await Report.findOne({
     _id: req.params.id,
     status: "VALIDATED",

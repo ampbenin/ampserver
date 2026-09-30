@@ -1,10 +1,14 @@
 /**
  * Contrôleur Finance
  * Hérite de l'isolation par espace
+ *
+ * Bug corrigé (2026-09-30, audit "gestion des IS") : même erreur que
+ * activityController.js — `Finance`/`Activity` étaient les loaders lazy
+ * jamais invoqués, jamais le modèle Mongoose lui-même.
  */
 
-const Finance = require("../../models/gestionamp/Finance");
-const Activity = require("../../models/gestionamp/Activity");
+const getFinanceModel = require("../../models/gestionamp/Finance");
+const getActivityModel = require("../../models/gestionamp/Activity");
 
 /**
  * @route POST /gestionamp/api/finances
@@ -13,6 +17,8 @@ const Activity = require("../../models/gestionamp/Activity");
 exports.createFinance = async (req, res) => {
   try {
     const { activityId, type, amount, description } = req.body;
+    const Activity = getActivityModel();
+    const Finance = getFinanceModel();
 
     // Vérifier que l'activité existe et appartient à l'espace
     const activity = await Activity.findOne({
@@ -51,6 +57,7 @@ exports.createFinance = async (req, res) => {
  */
 exports.getFinances = async (req, res) => {
   try {
+    const Finance = getFinanceModel();
     const finances = await Finance.find(req.spaceFilter)
       .populate("activityId", "title status")
       .sort({ createdAt: -1 });
@@ -70,6 +77,7 @@ exports.getFinances = async (req, res) => {
  */
 exports.getFinanceSummary = async (req, res) => {
   try {
+    const Finance = getFinanceModel();
     const finances = await Finance.find(req.spaceFilter);
 
     const totalIncome = finances
