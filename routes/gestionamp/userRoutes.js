@@ -26,6 +26,11 @@ router.use(authMiddleware, roleMiddleware("ADMIN"));
 // ➕ Créer un utilisateur EC ou IS
 router.post("/", userController.createUser);
 
+// ✉️ Envoyer un email d'invitation (bouton "se connecter" -> définir son
+// mot de passe) — depuis AddUserForm.jsx juste après création, ou depuis
+// UsersTable.jsx pour un compte existant.
+router.post("/:id/send-invite", userController.sendInviteEmail);
+
 // 📋 Lister tous les utilisateurs
 router.get("/", userController.getAllUsers);
 

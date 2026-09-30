@@ -4,10 +4,12 @@
  */
 
 const streamifier = require("streamifier");
+const crypto = require("crypto");
 const getUserModel = require("../../models/gestionamp/User");
 const getCoordinationCommunaleModel = require("../../models/gestionamp/CoordinationCommunale");
 const getInstitutionSpecialiseeModel = require("../../models/gestionamp/InstitutionSpecialisee");
 const cloudinary = require("../../utils/cloudinary");
+const resend = require("../../utils/resendMailer");
 
 /**
  * @route GET /gestionamp/api/users/staff-directory
@@ -113,6 +115,59 @@ exports.createUser = async (req, res) => {
         role: user.role,
       },
     });
+  } catch (error) {
+    res.status(500).json({
+      message: "Erreur serveur",
+      error: error.message,
+    });
+  }
+};
+
+/**
+ * @route POST /gestionamp/api/users/:id/send-invite
+ * @desc Envoie un email d'invitation au compte visé, avec un bouton qui lui
+ * permet de définir son mot de passe et de se connecter — retour
+ * utilisateur, 2026-09-30 : "lors de la création il faut un bouton envoyer
+ * de mail... le mail va contenir un bouton qui va lui permettre de se
+ * connecter". Réutilise exactement le même mécanisme que
+ * authController.js#forgotPassword (passwordResetTokenHash/Expires +
+ * page /reset-password déjà existante côté frontend) — pas de nouvelle
+ * page à construire, juste une expiration plus longue (7 jours, adaptée à
+ * une invitation plutôt qu'à un mot de passe oublié urgent) et un texte
+ * d'email différent. Utilisable aussi bien juste après la création
+ * (bouton dans AddUserForm.jsx) qu'a posteriori pour un compte existant
+ * (bouton dans UsersTable.jsx, ex : renvoyer l'invitation).
+ */
+exports.sendInviteEmail = async (req, res) => {
+  try {
+    const User = getUserModel();
+    const user = await User.findById(req.params.id);
+    if (!user) {
+      return res.status(404).json({ message: "Utilisateur introuvable" });
+    }
+
+    const rawToken = crypto.randomBytes(32).toString("hex");
+    user.passwordResetTokenHash = crypto.createHash("sha256").update(rawToken).digest("hex");
+    user.passwordResetExpires = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000); // 7 jours
+    await user.save();
+
+    const frontendBase = process.env.FRONTEND_URL || "https://ampbenin.org";
+    const setPasswordUrl = `${frontendBase}/reset-password?token=${rawToken}&email=${encodeURIComponent(user.email)}`;
+
+    try {
+      await resend.emails.send({
+        from: "AMP BENIN <candidatures@ampbenin.org>",
+        to: user.email,
+        subject: "Votre compte AMP BENIN a été créé",
+        text: `Bonjour ${user.name},\n\nUn compte vous a été créé sur la plateforme de gestion AMP BENIN.\nCliquez sur ce lien (valable 7 jours) pour définir votre mot de passe et vous connecter :\n${setPasswordUrl}\n\nSi vous ne vous attendiez pas à cet email, ignorez-le.`,
+        html: `<p>Bonjour ${user.name},</p><p>Un compte vous a été créé sur la plateforme de gestion AMP BENIN.</p><p style="text-align:center;margin:28px 0;"><a href="${setPasswordUrl}" style="display:inline-block;background:#1B4332;color:#FFFFFF;text-decoration:none;padding:12px 28px;border-radius:8px;font-weight:700;">Définir mon mot de passe et me connecter</a></p><p>Ce lien est valable 7 jours. Si vous ne vous attendiez pas à cet email, ignorez-le.</p>`,
+      });
+    } catch (mailError) {
+      console.error("❌ Erreur envoi email d'invitation:", mailError.message);
+      return res.status(502).json({ message: "Compte trouvé mais l'email n'a pas pu être envoyé — réessayez." });
+    }
+
+    res.json({ message: `Email d'invitation envoyé à ${user.email}` });
   } catch (error) {
     res.status(500).json({
       message: "Erreur serveur",
