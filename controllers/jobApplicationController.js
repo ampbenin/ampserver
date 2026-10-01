@@ -141,9 +141,26 @@ exports.uploadApplicationFile = async (req, res, next) => {
   try {
     if (!req.file) return res.status(400).json({ message: "Aucun fichier reçu" });
 
+    // `format` force Cloudinary à suffixer le public_id (donc secure_url)
+    // avec l'extension d'origine (ex : CV.pdf) — sans ça, un upload "raw"
+    // ne garde jamais l'extension et le fichier téléchargé arrive sans
+    // ".pdf"/".docx", obligeant l'utilisateur à la rajouter à la main.
+    // Nécessite que "Allow delivery of PDF and ZIP files" soit activé côté
+    // Cloudinary (Settings → Security) — fait le 2026-10-01 par l'ONG, voir
+    // aussi la restriction contournée différemment dans
+    // certificateController.js#buildDownloadUrl avant cette activation.
+    const originalName = req.file.originalname || "";
+    const extension = originalName.includes(".")
+      ? originalName.split(".").pop().toLowerCase()
+      : undefined;
+
     const uploaded = await new Promise((resolve, reject) => {
       const uploadStream = cloudinary.uploader.upload_stream(
-        { folder: "recruitment/applications", resource_type: "raw" },
+        {
+          folder: "recruitment/applications",
+          resource_type: "raw",
+          ...(extension && { format: extension }),
+        },
         (error, result) => (error ? reject(error) : resolve(result))
       );
       streamifier.createReadStream(req.file.buffer).pipe(uploadStream);
