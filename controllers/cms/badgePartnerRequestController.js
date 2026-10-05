@@ -2,9 +2,11 @@ const streamifier = require("streamifier");
 const cloudinary = require("../../utils/cloudinary");
 const getBadgeCampaignModel = require("../../models/cms/BadgeCampaign");
 const getBadgePartnerRequestModel = require("../../models/cms/BadgePartnerRequest");
+const { sendBulkEmail, escapeRegex } = require("../../utils/badgeBulkMail");
 
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const LOGO_MIME_TYPES = ["image/png", "image/jpeg", "image/webp", "image/svg+xml"];
+const MAX_PAGE_SIZE = 100;
 
 const uploadLogo = (buffer) =>
   new Promise((resolve, reject) => {
@@ -57,24 +59,51 @@ const submit = async (req, res, next) => {
   }
 };
 
-/* -------------------- Admin : lister les demandes -------------------- */
+// Filtre commun à la liste et à l'envoi groupé : recherche, campagne, statut.
+const buildFilter = ({ q, campaignId, status }) => {
+  const filter = {};
+  if (campaignId) filter.campaignId = campaignId;
+  if (status && ["PENDING", "ACCEPTED", "REJECTED"].includes(status)) filter.status = status;
+  if (q?.trim()) {
+    const regex = new RegExp(escapeRegex(q.trim()), "i");
+    filter.$or = [{ structureName: regex }, { email: regex }, { phone: regex }];
+  }
+  return filter;
+};
+
+const withCampaignTitles = async (requests) => {
+  const BadgeCampaign = getBadgeCampaignModel();
+  const campaignIds = [...new Set(requests.map((r) => String(r.campaignId)))];
+  const campaigns = await BadgeCampaign.find({ _id: { $in: campaignIds } }).select("title").lean();
+  const titleById = new Map(campaigns.map((c) => [String(c._id), c.title]));
+  return requests.map((r) => ({ ...r, campaignTitle: titleById.get(String(r.campaignId)) || "Campagne supprimée" }));
+};
+
+/* -------------------- Admin : lister les demandes (recherche, filtre, pagination) -------------------- */
 const list = async (req, res, next) => {
   try {
     const BadgePartnerRequest = getBadgePartnerRequestModel();
-    const BadgeCampaign = getBadgeCampaignModel();
-    const requests = await BadgePartnerRequest.find().sort({ createdAt: -1 }).lean();
+    const page = Math.max(1, Number(req.query.page) || 1);
+    const limit = Math.min(MAX_PAGE_SIZE, Math.max(1, Number(req.query.limit) || 20));
+    const filter = buildFilter(req.query);
 
-    const campaignIds = [...new Set(requests.map((r) => String(r.campaignId)))];
-    const campaigns = await BadgeCampaign.find({ _id: { $in: campaignIds } }).select("title").lean();
-    const titleById = new Map(campaigns.map((c) => [String(c._id), c.title]));
+    const [total, requests] = await Promise.all([
+      BadgePartnerRequest.countDocuments(filter),
+      BadgePartnerRequest.find(filter).sort({ createdAt: -1 }).skip((page - 1) * limit).limit(limit).lean(),
+    ]);
 
-    res.json(requests.map((r) => ({ ...r, campaignTitle: titleById.get(String(r.campaignId)) || "Campagne supprimée" })));
+    res.json({
+      items: await withCampaignTitles(requests),
+      total,
+      page,
+      pages: Math.max(1, Math.ceil(total / limit)),
+    });
   } catch (error) {
     next(error);
   }
 };
 
-/* -------------------- Admin : accepter (ajoute au partenaires) ou refuser -------------------- */
+/* -------------------- Admin : accepter (ajoute aux partenaires) ou refuser -------------------- */
 const review = async (req, res, next) => {
   try {
     const BadgePartnerRequest = getBadgePartnerRequestModel();
@@ -102,4 +131,37 @@ const review = async (req, res, next) => {
   }
 };
 
-module.exports = { submit, list, review };
+/* -------------------- Admin : supprimer une demande -------------------- */
+const remove = async (req, res, next) => {
+  try {
+    const BadgePartnerRequest = getBadgePartnerRequestModel();
+    const deleted = await BadgePartnerRequest.findByIdAndDelete(req.params.requestId);
+    if (!deleted) return res.status(404).json({ message: "Demande introuvable" });
+    res.json({ success: true });
+  } catch (error) {
+    next(error);
+  }
+};
+
+/* -------------------- Admin : envoi groupé (CCI) aux structures filtrées -------------------- */
+const sendEmail = async (req, res, next) => {
+  try {
+    const BadgePartnerRequest = getBadgePartnerRequestModel();
+    const { subject, message } = req.body;
+    if (!subject?.trim() || !message?.trim()) {
+      return res.status(400).json({ message: "Objet et message sont obligatoires" });
+    }
+
+    const requests = await BadgePartnerRequest.find(buildFilter(req.body)).select("email").lean();
+    if (requests.length === 0) {
+      return res.status(400).json({ message: "Aucun destinataire pour ce filtre" });
+    }
+
+    const sent = await sendBulkEmail(requests.map((r) => r.email), subject.trim(), message.trim());
+    res.json({ success: true, sent, message: `Email envoyé à ${sent} personne(s) en copie cachée` });
+  } catch (error) {
+    next(error);
+  }
+};
+
+module.exports = { submit, list, review, remove, sendEmail };

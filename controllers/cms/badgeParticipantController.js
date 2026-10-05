@@ -1,7 +1,9 @@
 const getBadgeCampaignModel = require("../../models/cms/BadgeCampaign");
 const getBadgeParticipantModel = require("../../models/cms/BadgeParticipant");
+const { sendBulkEmail, escapeRegex } = require("../../utils/badgeBulkMail");
 
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+const MAX_PAGE_SIZE = 100;
 
 /* -------------------- Public : rejoindre une campagne (avant d'obtenir le badge) -------------------- */
 const submit = async (req, res, next) => {
@@ -34,21 +36,80 @@ const submit = async (req, res, next) => {
   }
 };
 
-/* -------------------- Admin : lister les personnes ayant rejoint les campagnes -------------------- */
+// Filtre commun à la liste et à l'envoi groupé : recherche + campagne.
+const buildFilter = ({ q, campaignId }) => {
+  const filter = {};
+  if (campaignId) filter.campaignId = campaignId;
+  if (q?.trim()) {
+    const regex = new RegExp(escapeRegex(q.trim()), "i");
+    filter.$or = [{ name: regex }, { email: regex }, { whatsapp: regex }, { countryCity: regex }];
+  }
+  return filter;
+};
+
+const withCampaignTitles = async (participants) => {
+  const BadgeCampaign = getBadgeCampaignModel();
+  const campaignIds = [...new Set(participants.map((p) => String(p.campaignId)))];
+  const campaigns = await BadgeCampaign.find({ _id: { $in: campaignIds } }).select("title").lean();
+  const titleById = new Map(campaigns.map((c) => [String(c._id), c.title]));
+  return participants.map((p) => ({ ...p, campaignTitle: titleById.get(String(p.campaignId)) || "Campagne supprimée" }));
+};
+
+/* -------------------- Admin : lister les inscrits (recherche, filtre, pagination) -------------------- */
 const list = async (req, res, next) => {
   try {
     const BadgeParticipant = getBadgeParticipantModel();
-    const BadgeCampaign = getBadgeCampaignModel();
-    const participants = await BadgeParticipant.find().sort({ createdAt: -1 }).lean();
+    const page = Math.max(1, Number(req.query.page) || 1);
+    const limit = Math.min(MAX_PAGE_SIZE, Math.max(1, Number(req.query.limit) || 20));
+    const filter = buildFilter(req.query);
 
-    const campaignIds = [...new Set(participants.map((p) => String(p.campaignId)))];
-    const campaigns = await BadgeCampaign.find({ _id: { $in: campaignIds } }).select("title").lean();
-    const titleById = new Map(campaigns.map((c) => [String(c._id), c.title]));
+    const [total, participants] = await Promise.all([
+      BadgeParticipant.countDocuments(filter),
+      BadgeParticipant.find(filter).sort({ createdAt: -1 }).skip((page - 1) * limit).limit(limit).lean(),
+    ]);
 
-    res.json(participants.map((p) => ({ ...p, campaignTitle: titleById.get(String(p.campaignId)) || "Campagne supprimée" })));
+    res.json({
+      items: await withCampaignTitles(participants),
+      total,
+      page,
+      pages: Math.max(1, Math.ceil(total / limit)),
+    });
   } catch (error) {
     next(error);
   }
 };
 
-module.exports = { submit, list };
+/* -------------------- Admin : supprimer une inscription -------------------- */
+const remove = async (req, res, next) => {
+  try {
+    const BadgeParticipant = getBadgeParticipantModel();
+    const deleted = await BadgeParticipant.findByIdAndDelete(req.params.id);
+    if (!deleted) return res.status(404).json({ message: "Inscription introuvable" });
+    res.json({ success: true });
+  } catch (error) {
+    next(error);
+  }
+};
+
+/* -------------------- Admin : envoi groupé (CCI) à toutes les personnes filtrées -------------------- */
+const sendEmail = async (req, res, next) => {
+  try {
+    const BadgeParticipant = getBadgeParticipantModel();
+    const { subject, message, q, campaignId } = req.body;
+    if (!subject?.trim() || !message?.trim()) {
+      return res.status(400).json({ message: "Objet et message sont obligatoires" });
+    }
+
+    const participants = await BadgeParticipant.find(buildFilter({ q, campaignId })).select("email").lean();
+    if (participants.length === 0) {
+      return res.status(400).json({ message: "Aucun destinataire pour ce filtre" });
+    }
+
+    const sent = await sendBulkEmail(participants.map((p) => p.email), subject.trim(), message.trim());
+    res.json({ success: true, sent, message: `Email envoyé à ${sent} personne(s) en copie cachée` });
+  } catch (error) {
+    next(error);
+  }
+};
+
+module.exports = { submit, list, remove, sendEmail };

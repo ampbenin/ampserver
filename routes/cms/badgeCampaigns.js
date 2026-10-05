@@ -27,7 +27,11 @@ const requireAdmin = [authMiddleware, roleMiddleware("ADMIN")];
 
 router.get("/partner-requests", ...requireAdmin, partnerCtrl.list);
 router.patch("/partner-requests/:requestId", ...requireAdmin, partnerCtrl.review);
+router.delete("/partner-requests/:requestId", ...requireAdmin, partnerCtrl.remove);
+router.post("/partner-requests/send-email", ...requireAdmin, partnerCtrl.sendEmail);
 router.get("/participants", ...requireAdmin, participantCtrl.list);
+router.delete("/participants/:id", ...requireAdmin, participantCtrl.remove);
+router.post("/participants/send-email", ...requireAdmin, participantCtrl.sendEmail);
 
 router.get("/", ...requireAdmin, ctrl.list);
 router.post("/upload-image", ...requireAdmin, upload.single("file"), ctrl.uploadImage);
