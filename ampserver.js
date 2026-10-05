@@ -165,6 +165,7 @@ app.use("/api/cms/institutions", require("./routes/cms/institutions"));
 app.use("/api/cms/actions", require("./routes/cms/actions"));
 app.use("/api/cms/jobs", require("./routes/cms/jobs"));
 app.use("/api/cms/campaigns", require("./routes/cms/campaigns"));
+app.use("/api/cms/badge-campaigns", require("./routes/cms/badgeCampaigns"));
 app.use("/api/cms/media", require("./routes/cms/media"));
 
 // Recrutement : candidatures aux offres (JobPosting) + base du personnel
