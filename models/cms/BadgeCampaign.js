@@ -44,6 +44,8 @@ const BadgeCampaignSchema = new mongoose.Schema(
 
     // Couleur d'accent de la page publique (titres, bouton) et couleur du
     // nom imprimé sur le badge — propres à chaque campagne.
+    nameAlign: { type: String, enum: ["left", "center", "right"], default: "center" },
+
     colors: {
       accent: { type: String, match: /^#[0-9a-fA-F]{6}$/, default: "#1B4332" },
       nameText: { type: String, match: /^#[0-9a-fA-F]{6}$/, default: "#FFFFFF" },
