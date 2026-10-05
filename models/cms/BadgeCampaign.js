@@ -30,6 +30,13 @@ const BadgeCampaignSchema = new mongoose.Schema(
     photoZone: { type: ZoneSchema, required: true },
     nameZone: { type: ZoneSchema, required: true },
 
+    // Couleur d'accent de la page publique (titres, bouton) et couleur du
+    // nom imprimé sur le badge — propres à chaque campagne.
+    colors: {
+      accent: { type: String, match: /^#[0-9a-fA-F]{6}$/, default: "#1B4332" },
+      nameText: { type: String, match: /^#[0-9a-fA-F]{6}$/, default: "#FFFFFF" },
+    },
+
     status: {
       type: String,
       enum: ["DRAFT", "PUBLISHED"],

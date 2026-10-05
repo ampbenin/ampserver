@@ -50,7 +50,7 @@ const uploadTemplateImage = async (req, res, next) => {
 };
 
 const pickFields = (body) => {
-  const { slug, title, description, templateUrl, templatePublicId, photoZone, nameZone, status } = body;
+  const { slug, title, description, templateUrl, templatePublicId, photoZone, nameZone, colors, status } = body;
   return {
     ...(slug !== undefined && { slug: String(slug).trim().toLowerCase() }),
     ...(title !== undefined && { title }),
@@ -59,6 +59,7 @@ const pickFields = (body) => {
     ...(templatePublicId !== undefined && { templatePublicId }),
     ...(photoZone !== undefined && { photoZone }),
     ...(nameZone !== undefined && { nameZone }),
+    ...(colors !== undefined && { colors }),
     ...(status !== undefined && { status }),
   };
 };
