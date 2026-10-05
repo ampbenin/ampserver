@@ -3,6 +3,7 @@ const multer = require("multer");
 const router = express.Router();
 const ctrl = require("../../controllers/cms/badgeCampaignController");
 const partnerCtrl = require("../../controllers/cms/badgePartnerRequestController");
+const participantCtrl = require("../../controllers/cms/badgeParticipantController");
 const { authLimiter } = require("../../config/rateLimit");
 const authMiddleware = require("../../middlewares/gestionamp/authMiddleware");
 const roleMiddleware = require("../../middlewares/gestionamp/roleMiddleware");
@@ -18,11 +19,15 @@ router.get("/public/:slug", ctrl.getPublished);
 // 🌐 Demande de partenariat depuis la page publique (sans compte, limitée par IP)
 router.post("/public/:slug/partner-requests", authLimiter, upload.single("logo"), partnerCtrl.submit);
 
+// 🌐 Inscription à la campagne, préalable à l'affichage du badge
+router.post("/public/:slug/participants", authLimiter, participantCtrl.submit);
+
 // 🔐 Gestion réservée ADMIN (décision utilisateur : création par l'admin seulement)
 const requireAdmin = [authMiddleware, roleMiddleware("ADMIN")];
 
 router.get("/partner-requests", ...requireAdmin, partnerCtrl.list);
 router.patch("/partner-requests/:requestId", ...requireAdmin, partnerCtrl.review);
+router.get("/participants", ...requireAdmin, participantCtrl.list);
 
 router.get("/", ...requireAdmin, ctrl.list);
 router.post("/upload-image", ...requireAdmin, upload.single("file"), ctrl.uploadImage);
