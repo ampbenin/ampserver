@@ -17,7 +17,7 @@ router.get("/public/:slug", ctrl.getPublished);
 const requireAdmin = [authMiddleware, roleMiddleware("ADMIN")];
 
 router.get("/", ...requireAdmin, ctrl.list);
-router.post("/upload-template", ...requireAdmin, upload.single("file"), ctrl.uploadTemplateImage);
+router.post("/upload-image", ...requireAdmin, upload.single("file"), ctrl.uploadImage);
 router.post("/", ...requireAdmin, ctrl.create);
 router.put("/:id", ...requireAdmin, ctrl.update);
 router.delete("/:id", ...requireAdmin, ctrl.remove);

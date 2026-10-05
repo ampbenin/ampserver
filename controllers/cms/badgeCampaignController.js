@@ -18,7 +18,7 @@ const getPublished = async (req, res, next) => {
   try {
     const BadgeCampaign = getBadgeCampaignModel();
     const campaign = await BadgeCampaign.findOne({ slug: req.params.slug, status: "PUBLISHED" })
-      .select("-updatedBy -templatePublicId");
+      .select("-updatedBy -templatePublicId -bannerPublicId");
 
     if (!campaign) return res.status(404).json({ message: "Campagne non trouvée" });
     res.json(campaign);
@@ -39,7 +39,7 @@ const list = async (req, res, next) => {
 };
 
 /* -------------------- Admin : uploader le gabarit (image) -------------------- */
-const uploadTemplateImage = async (req, res, next) => {
+const uploadImage = async (req, res, next) => {
   try {
     if (!req.file) return res.status(400).json({ message: "Aucun fichier reçu" });
     const uploaded = await uploadTemplate(req.file.buffer);
@@ -50,7 +50,7 @@ const uploadTemplateImage = async (req, res, next) => {
 };
 
 const pickFields = (body) => {
-  const { slug, title, description, templateUrl, templatePublicId, photoZone, nameZone, colors, status } = body;
+  const { slug, title, description, templateUrl, templatePublicId, photoZone, nameZone, colors, bannerUrl, bannerPublicId, partners, status } = body;
   return {
     ...(slug !== undefined && { slug: String(slug).trim().toLowerCase() }),
     ...(title !== undefined && { title }),
@@ -60,6 +60,9 @@ const pickFields = (body) => {
     ...(photoZone !== undefined && { photoZone }),
     ...(nameZone !== undefined && { nameZone }),
     ...(colors !== undefined && { colors }),
+    ...(bannerUrl !== undefined && { bannerUrl }),
+    ...(bannerPublicId !== undefined && { bannerPublicId }),
+    ...(partners !== undefined && { partners }),
     ...(status !== undefined && { status }),
   };
 };
@@ -122,4 +125,4 @@ const remove = async (req, res, next) => {
   }
 };
 
-module.exports = { getPublished, list, uploadTemplateImage, create, update, remove };
+module.exports = { getPublished, list, uploadImage, create, update, remove };
