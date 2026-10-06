@@ -18,9 +18,10 @@ const getPublished = async (req, res, next) => {
   try {
     const BadgeCampaign = getBadgeCampaignModel();
     const campaign = await BadgeCampaign.findOne({ slug: req.params.slug, status: "PUBLISHED" })
-      .select("-updatedBy -templatePublicId -bannerPublicId");
+      .select("-updatedBy -templatePublicId -bannerPublicId -stats");
 
     if (!campaign) return res.status(404).json({ message: "Campagne non trouvée" });
+    BadgeCampaign.updateOne({ _id: campaign._id }, { $inc: { "stats.views": 1 } }).exec();
     res.json(campaign);
   } catch (error) {
     next(error);
@@ -50,7 +51,7 @@ const uploadImage = async (req, res, next) => {
 };
 
 const pickFields = (body) => {
-  const { slug, title, description, templateUrl, templatePublicId, photoZone, nameZone, nameAlign, nameMode, frameShape, frameStyle, frameColor, colors, bannerUrl, bannerPublicId, partners, status } = body;
+  const { slug, title, description, templateUrl, templatePublicId, photoZone, nameZone, nameAlign, nameMode, nameFontScale, frameShape, frameStyle, frameColor, colors, bannerUrl, bannerPublicId, partners, status } = body;
   return {
     ...(slug !== undefined && { slug: String(slug).trim().toLowerCase() }),
     ...(title !== undefined && { title }),
@@ -61,6 +62,7 @@ const pickFields = (body) => {
     ...(nameZone !== undefined && { nameZone }),
     ...(nameAlign !== undefined && { nameAlign }),
     ...(nameMode !== undefined && { nameMode }),
+    ...(nameFontScale !== undefined && { nameFontScale }),
     ...(frameShape !== undefined && { frameShape }),
     ...(frameStyle !== undefined && { frameStyle }),
     ...(frameColor !== undefined && { frameColor }),
@@ -130,4 +132,18 @@ const remove = async (req, res, next) => {
   }
 };
 
-module.exports = { getPublished, list, uploadImage, create, update, remove };
+const trackDownload = async (req, res, next) => {
+  try {
+    const BadgeCampaign = getBadgeCampaignModel();
+    const result = await BadgeCampaign.updateOne(
+      { slug: req.params.slug, status: "PUBLISHED" },
+      { $inc: { "stats.downloads": 1 } }
+    );
+    if (result.matchedCount === 0) return res.status(404).json({ message: "Campagne non trouvée" });
+    res.json({ success: true });
+  } catch (error) {
+    next(error);
+  }
+};
+
+module.exports = { getPublished, trackDownload, list, uploadImage, create, update, remove };

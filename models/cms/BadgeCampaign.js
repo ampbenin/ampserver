@@ -48,6 +48,12 @@ const BadgeCampaignSchema = new mongoose.Schema(
 
     // Réglages par défaut du cadre de la photo, que le visiteur peut changer.
     nameMode: { type: String, enum: ["required", "optional", "disabled"], default: "required" },
+    nameFontScale: { type: Number, min: 40, max: 150, default: 100 },
+
+    stats: {
+      views: { type: Number, default: 0 },
+      downloads: { type: Number, default: 0 },
+    },
 
     frameShape: { type: String, enum: ["square", "circle"], default: "square" },
     frameStyle: { type: String, enum: ["none", "simple", "double", "or", "argent", "ombre"], default: "none" },

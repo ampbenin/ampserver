@@ -16,6 +16,9 @@ const upload = multer({
 // 🌐 Lecture publique d'une campagne publiée (page /badge/[slug])
 router.get("/public/:slug", ctrl.getPublished);
 
+// 🌐 Compteur de téléchargements de badge (sans compte, limité par IP)
+router.post("/public/:slug/download", authLimiter, ctrl.trackDownload);
+
 // 🌐 Demande de partenariat depuis la page publique (sans compte, limitée par IP)
 router.post("/public/:slug/partner-requests", authLimiter, upload.single("logo"), partnerCtrl.submit);
 
