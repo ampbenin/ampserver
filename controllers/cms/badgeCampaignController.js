@@ -50,7 +50,7 @@ const uploadImage = async (req, res, next) => {
 };
 
 const pickFields = (body) => {
-  const { slug, title, description, templateUrl, templatePublicId, photoZone, nameZone, nameAlign, frameShape, frameStyle, frameColor, colors, bannerUrl, bannerPublicId, partners, status } = body;
+  const { slug, title, description, templateUrl, templatePublicId, photoZone, nameZone, nameAlign, nameMode, frameShape, frameStyle, frameColor, colors, bannerUrl, bannerPublicId, partners, status } = body;
   return {
     ...(slug !== undefined && { slug: String(slug).trim().toLowerCase() }),
     ...(title !== undefined && { title }),
@@ -60,6 +60,7 @@ const pickFields = (body) => {
     ...(photoZone !== undefined && { photoZone }),
     ...(nameZone !== undefined && { nameZone }),
     ...(nameAlign !== undefined && { nameAlign }),
+    ...(nameMode !== undefined && { nameMode }),
     ...(frameShape !== undefined && { frameShape }),
     ...(frameStyle !== undefined && { frameStyle }),
     ...(frameColor !== undefined && { frameColor }),

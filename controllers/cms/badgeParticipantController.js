@@ -14,21 +14,20 @@ const submit = async (req, res, next) => {
     const campaign = await BadgeCampaign.findOne({ slug: req.params.slug, status: "PUBLISHED" }).select("_id");
     if (!campaign) return res.status(404).json({ message: "Campagne non trouvée" });
 
-    const { name, email, whatsapp, countryCity } = req.body;
-    if (!name?.trim() || !email?.trim() || !whatsapp?.trim() || !countryCity?.trim()) {
-      return res.status(400).json({ message: "Tous les champs sont obligatoires" });
+    const fields = {
+      name: req.body.name?.trim() || "",
+      email: req.body.email?.trim() || "",
+      whatsapp: req.body.whatsapp?.trim() || "",
+      countryCity: req.body.countryCity?.trim() || "",
+    };
+    if (!Object.values(fields).some(Boolean)) {
+      return res.status(400).json({ message: "Renseignez au moins un champ, ou passez cette étape" });
     }
-    if (!EMAIL_PATTERN.test(email.trim())) {
+    if (fields.email && !EMAIL_PATTERN.test(fields.email)) {
       return res.status(400).json({ message: "Adresse email invalide" });
     }
 
-    await BadgeParticipant.create({
-      campaignId: campaign._id,
-      name,
-      email,
-      whatsapp,
-      countryCity,
-    });
+    await BadgeParticipant.create({ campaignId: campaign._id, ...fields });
 
     res.status(201).json({ message: "Merci ! Votre badge est prêt." });
   } catch (error) {
