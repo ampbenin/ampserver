@@ -46,6 +46,11 @@ const BadgeCampaignSchema = new mongoose.Schema(
     // nom imprimé sur le badge — propres à chaque campagne.
     nameAlign: { type: String, enum: ["left", "center", "right"], default: "center" },
 
+    // Réglages par défaut du cadre de la photo, que le visiteur peut changer.
+    frameShape: { type: String, enum: ["square", "circle"], default: "square" },
+    frameStyle: { type: String, enum: ["none", "simple", "double", "or", "argent", "ombre"], default: "none" },
+    frameColor: { type: String, match: /^#[0-9a-fA-F]{6}$/, default: "#1B4332" },
+
     colors: {
       accent: { type: String, match: /^#[0-9a-fA-F]{6}$/, default: "#1B4332" },
       nameText: { type: String, match: /^#[0-9a-fA-F]{6}$/, default: "#FFFFFF" },
