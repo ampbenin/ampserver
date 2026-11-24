@@ -7,8 +7,10 @@
  * VolunteerProgramEditor.jsx résout les membres ACCEPTED du groupe en
  * volunteerId avant de les pré-cocher — aucune logique de résolution ici).
  * Même périmètre d'autorisation que les candidatures elles-mêmes
- * (canReviewProgram) : jamais les superviseurs, qui n'ont aucun droit sur
- * les candidatures.
+ * (canReviewProgram) : un compte EC/IS/SUPERVISEUR/PARTENAIRE n'y a droit
+ * que s'il est explicitement affecté comme réviseur du programme
+ * (program.reviewerIds) — voir VolunteerProgramEditor.jsx, section
+ * "Réviseurs affectés à ce programme".
  */
 
 const getVolunteerApplicationGroupModel = require("../models/volunteerApplicationGroup");

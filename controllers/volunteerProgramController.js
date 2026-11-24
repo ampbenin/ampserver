@@ -117,14 +117,20 @@ exports.getProgramById = async (req, res, next) => {
   }
 };
 
-/* -------------------- Staff (ADMIN/EDITOR) : liste complète (gestion) -------------------- */
-/* Un EDITOR ne voit que les programmes qui lui sont affectés (editorIds) —
-   ADMIN voit tout, sans condition. */
+/* -------------------- Staff : liste complète (gestion) -------------------- */
+/* ADMIN voit tout, sans condition. Un EDITOR ne voit que les programmes qui
+   lui sont affectés (editorIds). Tout autre rôle (EC/IS/SUPERVISEUR/
+   PARTENAIRE...) ne voit que les programmes où il figure comme réviseur
+   (reviewerIds, voir canReviewProgram) — retour utilisateur, 2026-11-24 :
+   permet à un réviseur de retrouver les programmes qui lui sont confiés
+   pour en traiter les candidatures. */
 exports.listAllPrograms = async (req, res, next) => {
   try {
     await closeExpiredPrograms();
     const Program = getVolunteerProgramModel();
-    const query = req.user.role === "EDITOR" ? { editorIds: req.user.id } : {};
+    let query = {};
+    if (req.user.role === "EDITOR") query = { editorIds: req.user.id };
+    else if (req.user.role !== "ADMIN") query = { reviewerIds: req.user.id };
     const programs = await Program.find(query)
       .select("title status location startDate endDate accessMode applicationDeadline capacity")
       .sort({ createdAt: -1 });
