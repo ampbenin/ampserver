@@ -26,7 +26,12 @@ const { closeExpiredPrograms, canReviewProgram, DEFAULT_BUILTIN_FIELDS } = requi
 const { validateApplicationResponses } = require("../utils/applicationFormLogic");
 const { generateSetPasswordUrl } = require("./volunteerAuthController");
 
-const FRONTEND_BASE = process.env.FRONTEND_URL || "https://ampbenin.org";
+// "Mon espace" (login volontaire) vit désormais sur son propre sous-domaine
+// — retour utilisateur, 2026-11-24 : ampbenin.org/mon-espace/login
+// redirige vers programme.ampbenin.org/mon-espace/login depuis la dernière
+// mise à jour, donc on pointe directement dessus dans l'email d'admission
+// pour épargner ce saut au volontaire retenu.
+const VOLUNTEER_FRONTEND_BASE = process.env.VOLUNTEER_FRONTEND_URL || "https://programme.ampbenin.org";
 
 // Fixé en dur (pas de process.env.RESEND_FROM_EMAIL) : cette variable est
 // partagée avec NumSAL (controllers/numsal/*.js) et réglée côté serveur sur
@@ -561,7 +566,7 @@ async function sendReceivedEmail(application, program) {
    email (pas d'email séparé). Sinon, un simple lien vers la connexion. */
 async function sendAcceptedEmail(application, program, setPasswordUrl) {
   const name = fullName(application);
-  const loginUrl = `${FRONTEND_BASE}/mon-espace/login`;
+  const loginUrl = `${VOLUNTEER_FRONTEND_BASE}/mon-espace/login`;
   const spaceCtaText = setPasswordUrl
     ? "Votre espace volontaire est prêt : cliquez ci-dessous pour choisir votre mot de passe et suivre vos candidatures, vos missions et vos attestations."
     : "Retrouvez le suivi de vos candidatures, vos missions et vos attestations dans votre espace volontaire.";

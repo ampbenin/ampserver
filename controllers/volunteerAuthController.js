@@ -23,7 +23,9 @@ const loginAttemptLimiter = require("../utils/loginAttemptLimiter");
 // sandbox Resend, restreint à l'email du propriétaire du compte : les
 // emails vers de vrais destinataires n'arrivaient plus avec cette adresse).
 const RESEND_FROM = "VOLONTAIRE AMP BENIN <candidatures@ampbenin.org>";
-const FRONTEND_BASE = process.env.FRONTEND_URL || "https://ampbenin.org";
+// "Mon espace" (login/activation volontaire) vit désormais sur son propre
+// sous-domaine — voir la même note dans volunteerApplicationController.js.
+const VOLUNTEER_FRONTEND_BASE = process.env.VOLUNTEER_FRONTEND_URL || "https://programme.ampbenin.org";
 const AMP_BRAND = {
   brandLabel: "AMP BÉNIN — Volontariat",
   footerText: "AMP BÉNIN — Programme de volontariat · Ceci est un message automatique.",
@@ -50,7 +52,7 @@ async function generateSetPasswordUrl(volunteer) {
   volunteer.passwordResetTokenHash = crypto.createHash("sha256").update(rawToken).digest("hex");
   volunteer.passwordResetExpires = new Date(Date.now() + 60 * 60 * 1000); // 1h
   await volunteer.save();
-  return `${FRONTEND_BASE}/mon-espace/definir-mot-de-passe?token=${rawToken}&email=${encodeURIComponent(volunteer.email)}`;
+  return `${VOLUNTEER_FRONTEND_BASE}/mon-espace/definir-mot-de-passe?token=${rawToken}&email=${encodeURIComponent(volunteer.email)}`;
 }
 
 /* -------------------- Interne : envoyer un email dédié avec ce lien -------------------- */
