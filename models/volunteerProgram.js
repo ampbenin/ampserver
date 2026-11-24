@@ -83,6 +83,23 @@ const VolunteerProgramSchema = new mongoose.Schema(
     // VolunteerForm.handledBy déjà existant.
     reviewerIds: [{ type: mongoose.Schema.Types.ObjectId, ref: "GestionAmpUser", default: [] }],
 
+    // Portée de candidatures par réviseur — retour utilisateur, 2026-11-24 :
+    // "donné à un superviseur soit la totalité de candidature ou un nombre
+    // [de candidatures] affectées" (plusieurs superviseurs, chacun avec un
+    // sous-ensemble choisi). Un réviseur SANS entrée ici (ou avec
+    // applicationIds vide) voit TOUTES les candidatures du programme
+    // (comportement historique, inchangé) ; une entrée avec applicationIds
+    // non vide restreint ce réviseur à CES candidatures précises — voir
+    // getReviewerApplicationScope (volunteerApplicationController.js).
+    // Toujours vide pour EDITOR/ADMIN, qui ne sont jamais restreints.
+    reviewerScopes: [
+      {
+        _id: false,
+        userId: { type: mongoose.Schema.Types.ObjectId, ref: "GestionAmpUser", required: true },
+        applicationIds: [{ type: mongoose.Schema.Types.ObjectId, ref: "VolunteerApplication", default: [] }],
+      },
+    ],
+
     // Comptes EDITOR affectés à CE programme — un EDITOR n'a plus, depuis le
     // 2026-08-17, d'accès à tous les programmes par défaut (auparavant le
     // rôle EDITOR seul suffisait, voir git blame) : il ne peut désormais

@@ -79,6 +79,20 @@ const canReviewProgram = (program, user) => {
 };
 exports.canReviewProgram = canReviewProgram;
 
+// Portée de candidatures d'un utilisateur déjà autorisé par canReviewProgram
+// (appeler getReviewerApplicationScope SANS avoir vérifié canReviewProgram
+// avant n'a aucun sens — cette fonction ne fait QUE restreindre un accès
+// déjà accordé, jamais en accorder un). Retourne `null` = accès à TOUTES
+// les candidatures (ADMIN, EDITOR affecté, ou réviseur sans restriction),
+// ou un tableau d'ids (en string) = accès limité à CES candidatures.
+const getReviewerApplicationScope = (program, user) => {
+  if (user.role === "ADMIN" || user.role === "EDITOR") return null;
+  const scope = (program.reviewerScopes || []).find((s) => String(s.userId) === String(user.id));
+  if (!scope || !scope.applicationIds || scope.applicationIds.length === 0) return null;
+  return scope.applicationIds.map((id) => String(id));
+};
+exports.getReviewerApplicationScope = getReviewerApplicationScope;
+
 /* -------------------- Public : catalogue des programmes publiés -------------------- */
 exports.listPublicPrograms = async (req, res, next) => {
   try {
@@ -313,6 +327,57 @@ exports.deleteProgram = async (req, res, next) => {
 
     await program.deleteOne();
     res.json({ success: true, message: "Programme supprimé" });
+  } catch (error) {
+    next(error);
+  }
+};
+
+/* -------------------- ADMIN/EDITOR : portée de candidatures d'un réviseur -------------------- */
+/* Retour utilisateur, 2026-11-24 : un même programme peut avoir plusieurs
+   réviseurs (reviewerIds), chacun confié soit à TOUTES les candidatures,
+   soit à un nombre précis choisi par l'admin — mode "all" retire toute
+   restriction (comportement historique), "add"/"replace" posent ou
+   complètent la liste précise de ce réviseur. Les candidatures fournies
+   sont filtrées à celles qui appartiennent réellement à CE programme,
+   pour ne jamais pouvoir affecter une candidature d'un autre programme. */
+exports.setReviewerScope = async (req, res, next) => {
+  try {
+    const Program = getVolunteerProgramModel();
+    const program = await Program.findById(req.params.id);
+    if (!program) return res.status(404).json({ message: "Programme introuvable" });
+    if (!canReviewProgram(program, req.user)) {
+      return res.status(403).json({ message: "Vous n'êtes pas autorisé à gérer ce programme" });
+    }
+
+    const { userId, applicationIds, mode } = req.body;
+    if (!userId) return res.status(400).json({ message: "userId requis" });
+    if (!(program.reviewerIds || []).some((id) => String(id) === String(userId))) {
+      return res.status(400).json({ message: "Ce compte n'est pas réviseur de ce programme" });
+    }
+
+    if (mode === "all") {
+      program.reviewerScopes = (program.reviewerScopes || []).filter((s) => String(s.userId) !== String(userId));
+    } else {
+      const requestedIds = Array.isArray(applicationIds) ? applicationIds.map(String) : [];
+      const Application = getVolunteerApplicationModel();
+      const validApplications = requestedIds.length > 0
+        ? await Application.find({ _id: { $in: requestedIds }, programId: program._id }).select("_id")
+        : [];
+      const validIds = validApplications.map((a) => String(a._id));
+
+      const existing = (program.reviewerScopes || []).find((s) => String(s.userId) === String(userId));
+      const nextIds = mode === "replace"
+        ? [...new Set(validIds)]
+        : [...new Set([...(existing?.applicationIds.map(String) || []), ...validIds])];
+
+      if (existing) existing.applicationIds = nextIds;
+      else {
+        program.reviewerScopes = [...(program.reviewerScopes || []), { userId, applicationIds: nextIds }];
+      }
+    }
+
+    await program.save();
+    res.json({ reviewerScopes: program.reviewerScopes });
   } catch (error) {
     next(error);
   }

@@ -39,6 +39,7 @@ router.post("/", ...requireStaff, ctrl.createProgram);
 router.get("/:id", authMiddleware, ctrl.getProgramById);
 router.put("/:id", ...requireStaff, ctrl.updateProgramMeta);
 router.delete("/:id", ...requireStaff, ctrl.deleteProgram);
+router.patch("/:id/reviewer-scope", ...requireStaff, ctrl.setReviewerScope);
 router.patch("/:id/supervisors", ...requireStaff, ctrl.setSupervisorAssignment);
 router.patch("/:id/partners", ...requireStaff, ctrl.setPartnerAccess);
 router.patch("/:id/editors", ...requireAdminOnly, ctrl.setEditorAccess);

@@ -22,7 +22,7 @@ const getVolunteerFormTemplateModel = require("../models/volunteerFormTemplate")
 const Volunteer = require("../models/volunteer");
 const resend = require("../utils/resendMailer");
 const { renderBrandedEmail, renderContactBlockText, escapeHtml } = require("../utils/emailTemplates");
-const { closeExpiredPrograms, canReviewProgram, DEFAULT_BUILTIN_FIELDS } = require("./volunteerProgramController");
+const { closeExpiredPrograms, canReviewProgram, getReviewerApplicationScope, DEFAULT_BUILTIN_FIELDS } = require("./volunteerProgramController");
 const { validateApplicationResponses } = require("../utils/applicationFormLogic");
 const { generateSetPasswordUrl } = require("./volunteerAuthController");
 
@@ -213,6 +213,8 @@ exports.listApplications = async (req, res, next) => {
         return res.status(403).json({ message: "Vous n'êtes pas autorisé à consulter les candidatures de ce programme" });
       }
       query.programId = programId;
+      const scope = getReviewerApplicationScope(program, req.user);
+      if (scope) query._id = { $in: scope };
     } else if (req.user.role !== "ADMIN") {
       return res.status(403).json({ message: "Non autorisé" });
     }
@@ -286,6 +288,10 @@ exports.acceptApplication = async (req, res, next) => {
       if (!canReviewProgram(program, req.user)) {
         return res.status(403).json({ message: "Vous n'êtes pas autorisé à évaluer ce programme" });
       }
+      const scope = getReviewerApplicationScope(program, req.user);
+      if (scope && !scope.includes(String(application._id))) {
+        return res.status(403).json({ message: "Cette candidature ne vous est pas affectée" });
+      }
     } else if (req.user.role !== "ADMIN") {
       return res.status(403).json({ message: "Non autorisé" });
     }
@@ -313,6 +319,10 @@ exports.rejectApplication = async (req, res, next) => {
       if (!program) return res.status(404).json({ message: "Programme introuvable" });
       if (!canReviewProgram(program, req.user)) {
         return res.status(403).json({ message: "Vous n'êtes pas autorisé à évaluer ce programme" });
+      }
+      const scope = getReviewerApplicationScope(program, req.user);
+      if (scope && !scope.includes(String(application._id))) {
+        return res.status(403).json({ message: "Cette candidature ne vous est pas affectée" });
       }
     } else if (req.user.role !== "ADMIN") {
       return res.status(403).json({ message: "Non autorisé" });
@@ -346,6 +356,10 @@ exports.deleteApplication = async (req, res, next) => {
       const program = await Program.findById(application.programId);
       if (program && !canReviewProgram(program, req.user)) {
         return res.status(403).json({ message: "Vous n'êtes pas autorisé à gérer les candidatures de ce programme" });
+      }
+      const scope = program && getReviewerApplicationScope(program, req.user);
+      if (scope && !scope.includes(String(application._id))) {
+        return res.status(403).json({ message: "Cette candidature ne vous est pas affectée" });
       }
     } else if (req.user.role !== "ADMIN") {
       return res.status(403).json({ message: "Non autorisé" });
@@ -383,6 +397,8 @@ exports.bulkAcceptApplications = async (req, res, next) => {
           program = await Program.findById(application.programId);
           if (!program) { failed.push({ id, message: "Programme introuvable" }); continue; }
           if (!canReviewProgram(program, req.user)) { failed.push({ id, message: "Non autorisé" }); continue; }
+          const scope = getReviewerApplicationScope(program, req.user);
+          if (scope && !scope.includes(String(application._id))) { failed.push({ id, message: "Cette candidature ne vous est pas affectée" }); continue; }
         } else if (req.user.role !== "ADMIN") {
           failed.push({ id, message: "Non autorisé" });
           continue;
@@ -422,6 +438,8 @@ exports.bulkRejectApplications = async (req, res, next) => {
           const program = await Program.findById(application.programId);
           if (!program) { failed.push({ id, message: "Programme introuvable" }); continue; }
           if (!canReviewProgram(program, req.user)) { failed.push({ id, message: "Non autorisé" }); continue; }
+          const scope = getReviewerApplicationScope(program, req.user);
+          if (scope && !scope.includes(String(application._id))) { failed.push({ id, message: "Cette candidature ne vous est pas affectée" }); continue; }
         } else if (req.user.role !== "ADMIN") {
           failed.push({ id, message: "Non autorisé" });
           continue;
