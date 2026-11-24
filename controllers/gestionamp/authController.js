@@ -13,6 +13,7 @@ const getInstitutionSpecialiseeModel = require("../../models/gestionamp/Institut
 const jwtConfig = require("../../config/jwt");
 const resend = require("../../utils/resendMailer");
 const { logPartnerActivity } = require("../../utils/partnerActivityLogger");
+const PROGRAMME_FRONTEND_BASE = require("../../utils/programmeFrontendUrl");
 const loginAttemptLimiter = require("../../utils/loginAttemptLimiter");
 
 /**
@@ -192,8 +193,7 @@ exports.forgotPassword = async (req, res) => {
     user.passwordResetExpires = new Date(Date.now() + 60 * 60 * 1000); // 1h
     await user.save();
 
-    const frontendBase = process.env.FRONTEND_URL || "https://ampbenin.org";
-    const resetUrl = `${frontendBase}/reset-password?token=${rawToken}&email=${encodeURIComponent(email)}`;
+    const resetUrl = `${PROGRAMME_FRONTEND_BASE}/reset-password?token=${rawToken}&email=${encodeURIComponent(email)}`;
 
     try {
       await resend.emails.send({

@@ -26,12 +26,12 @@ const { closeExpiredPrograms, canReviewProgram, DEFAULT_BUILTIN_FIELDS } = requi
 const { validateApplicationResponses } = require("../utils/applicationFormLogic");
 const { generateSetPasswordUrl } = require("./volunteerAuthController");
 
-// "Mon espace" (login volontaire) vit désormais sur son propre sous-domaine
-// — retour utilisateur, 2026-11-24 : ampbenin.org/mon-espace/login
-// redirige vers programme.ampbenin.org/mon-espace/login depuis la dernière
-// mise à jour, donc on pointe directement dessus dans l'email d'admission
-// pour épargner ce saut au volontaire retenu.
-const VOLUNTEER_FRONTEND_BASE = process.env.VOLUNTEER_FRONTEND_URL || "https://programme.ampbenin.org";
+// "Mon espace" (login volontaire) vit sur le même sous-domaine que le CMS
+// gestionamp — voir utils/programmeFrontendUrl.js (mise à jour générale,
+// 2026-11-24 : tous les liens générés pointent désormais directement sur
+// programme.ampbenin.org, plus besoin de passer par la redirection depuis
+// ampbenin.org).
+const VOLUNTEER_FRONTEND_BASE = require("../utils/programmeFrontendUrl");
 
 // Fixé en dur (pas de process.env.RESEND_FROM_EMAIL) : cette variable est
 // partagée avec NumSAL (controllers/numsal/*.js) et réglée côté serveur sur

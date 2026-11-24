@@ -17,12 +17,12 @@ const AMP_BRAND = {
   footerText: "AMP BÉNIN — Programme de volontariat · Ceci est un message automatique.",
 };
 
-// Même pattern que volunteerAuthController.js / volunteerApplicationController.js
-// / gestionamp/authController.js : domaine du frontend configurable via
-// FRONTEND_URL, secours sur le domaine propre ampbenin.org (nom de domaine
-// personnalisé branché sur Netlify, 2026-09-10 — remplace l'ancien
-// sous-domaine ampbenin.netlify.app utilisé partout avant ça).
+// Domaine du site public (QR code de vérification — reste sur ampbenin.org,
+// contrairement au lien "mon espace" ci-dessous).
 const FRONTEND_BASE = process.env.FRONTEND_URL || "https://ampbenin.org";
+// "Mon espace" (login volontaire) vit sur son propre sous-domaine — voir
+// utils/programmeFrontendUrl.js.
+const PROGRAMME_FRONTEND_BASE = require("../utils/programmeFrontendUrl");
 
 /* Refondu le 2026-08-19 (raisonne par programId, autorisation via
    canReviewProgram) puis à nouveau le 2026-09-10 (décision utilisateur) :
@@ -565,7 +565,7 @@ const resetCertificates = async (req, res) => {
 // jamais faire échouer la mise à jour de visibilité elle-même.
 async function sendCertificateAvailableEmail(volunteer, programTitle) {
   if (!volunteer.email) return;
-  const loginUrl = `${FRONTEND_BASE}/mon-espace/login`;
+  const loginUrl = `${PROGRAMME_FRONTEND_BASE}/mon-espace/login`;
   const title = "🎓 Votre attestation est disponible !";
   const text =
     `Bonjour ${volunteer.prenom},\n\n` +

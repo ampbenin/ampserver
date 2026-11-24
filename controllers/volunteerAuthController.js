@@ -23,9 +23,9 @@ const loginAttemptLimiter = require("../utils/loginAttemptLimiter");
 // sandbox Resend, restreint à l'email du propriétaire du compte : les
 // emails vers de vrais destinataires n'arrivaient plus avec cette adresse).
 const RESEND_FROM = "VOLONTAIRE AMP BENIN <candidatures@ampbenin.org>";
-// "Mon espace" (login/activation volontaire) vit désormais sur son propre
-// sous-domaine — voir la même note dans volunteerApplicationController.js.
-const VOLUNTEER_FRONTEND_BASE = process.env.VOLUNTEER_FRONTEND_URL || "https://programme.ampbenin.org";
+// "Mon espace" (login/activation volontaire) vit sur le même sous-domaine
+// que le CMS gestionamp — voir utils/programmeFrontendUrl.js.
+const VOLUNTEER_FRONTEND_BASE = require("../utils/programmeFrontendUrl");
 const AMP_BRAND = {
   brandLabel: "AMP BÉNIN — Volontariat",
   footerText: "AMP BÉNIN — Programme de volontariat · Ceci est un message automatique.",

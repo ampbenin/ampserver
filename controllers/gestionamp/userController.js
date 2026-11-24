@@ -10,6 +10,7 @@ const getCoordinationCommunaleModel = require("../../models/gestionamp/Coordinat
 const getInstitutionSpecialiseeModel = require("../../models/gestionamp/InstitutionSpecialisee");
 const cloudinary = require("../../utils/cloudinary");
 const resend = require("../../utils/resendMailer");
+const PROGRAMME_FRONTEND_BASE = require("../../utils/programmeFrontendUrl");
 
 /**
  * @route GET /gestionamp/api/users/staff-directory
@@ -154,8 +155,7 @@ exports.sendInviteEmail = async (req, res) => {
     user.passwordResetExpires = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000); // 7 jours
     await user.save();
 
-    const frontendBase = process.env.FRONTEND_URL || "https://ampbenin.org";
-    const setPasswordUrl = `${frontendBase}/reset-password?token=${rawToken}&email=${encodeURIComponent(user.email)}`;
+    const setPasswordUrl = `${PROGRAMME_FRONTEND_BASE}/reset-password?token=${rawToken}&email=${encodeURIComponent(user.email)}`;
 
     try {
       await resend.emails.send({
