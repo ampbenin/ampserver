@@ -330,8 +330,17 @@ exports.acceptApplication = async (req, res, next) => {
     const Application = getVolunteerApplicationModel();
     const application = await Application.findById(req.params.id);
     if (!application) return res.status(404).json({ message: "Candidature introuvable" });
-    if (application.status !== "PENDING") {
-      return res.status(409).json({ message: "Cette candidature a déjà été traitée" });
+    if (application.status === "ACCEPTED") {
+      return res.status(409).json({ message: "Cette candidature a déjà été acceptée" });
+    }
+    // Un réviseur non-ADMIN ne peut traiter qu'une candidature EN ATTENTE —
+    // revenir sur un rejet est réservé ADMIN (retour utilisateur,
+    // 2026-11-25 : "si un superviseur rejette, admin peut venir modifier et
+    // accepter la personne"). ADMIN peut donc accepter une candidature
+    // REJECTED, ce qui l'admet normalement (même effet qu'une acceptation
+    // depuis PENDING — crée/retrouve le profil Volontaire, envoie l'email).
+    if (application.status === "REJECTED" && req.user.role !== "ADMIN") {
+      return res.status(409).json({ message: "Cette candidature a déjà été rejetée — seul un ADMIN peut revenir sur ce rejet" });
     }
 
     let program = null;
@@ -444,7 +453,11 @@ exports.bulkAcceptApplications = async (req, res, next) => {
       try {
         const application = await Application.findById(id);
         if (!application) { failed.push({ id, message: "Candidature introuvable" }); continue; }
-        if (application.status !== "PENDING") { failed.push({ id, message: "Déjà traitée" }); continue; }
+        if (application.status === "ACCEPTED") { failed.push({ id, message: "Déjà acceptée" }); continue; }
+        if (application.status === "REJECTED" && req.user.role !== "ADMIN") {
+          failed.push({ id, message: "Déjà rejetée — seul un ADMIN peut revenir sur ce rejet" });
+          continue;
+        }
 
         let program = null;
         if (application.programId) {
