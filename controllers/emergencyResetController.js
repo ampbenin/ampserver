@@ -45,8 +45,16 @@ function hasFieldData(volunteer, field) {
 function compareAnswer(volunteer, field, answer) {
   const normalize = (s) => String(s ?? "").trim().toLowerCase();
   switch (field) {
-    case "nom": return normalize(volunteer.nom) === normalize(answer) && normalize(answer) !== "";
-    case "prenom": return normalize(volunteer.prenom) === normalize(answer) && normalize(answer) !== "";
+    // "nom"/"prenom" acceptent l'un OU l'autre — retour utilisateur,
+    // 2026-11-25 : des volontaires répondent "identifiant incorrect" en
+    // boucle alors que leur donnée est correcte ; "votre nom" est souvent
+    // compris comme "comment vous vous appelez" (donc le prénom) plutôt que
+    // strictement le nom de famille. Accepter les deux élimine cette
+    // confusion sans changer la question posée côté volontaire.
+    case "nom":
+      return normalize(answer) !== "" && (normalize(volunteer.nom) === normalize(answer) || normalize(volunteer.prenom) === normalize(answer));
+    case "prenom":
+      return normalize(answer) !== "" && (normalize(volunteer.prenom) === normalize(answer) || normalize(volunteer.nom) === normalize(answer));
     case "telephone": {
       const digitsOnly = (s) => String(s ?? "").replace(/\D/g, "");
       const a = digitsOnly(volunteer.telephone);
