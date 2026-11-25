@@ -24,6 +24,7 @@ router.get("/mine", volunteerAuthMiddleware, ctrl.listMyApplications);
 // Routes /bulk et /groups AVANT /:id pour éviter qu'Express ne les matche
 // comme un :id.
 router.get("/", authMiddleware, ctrl.listApplications);
+router.get("/emails", authMiddleware, ctrl.listApplicationEmails);
 router.patch("/bulk/accept", authMiddleware, ctrl.bulkAcceptApplications);
 router.patch("/bulk/reject", authMiddleware, ctrl.bulkRejectApplications);
 router.delete("/bulk", authMiddleware, ctrl.deleteAllApplications);

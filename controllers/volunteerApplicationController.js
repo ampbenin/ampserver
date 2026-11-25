@@ -19,6 +19,7 @@
 const getVolunteerProgramModel = require("../models/volunteerProgram");
 const getVolunteerApplicationModel = require("../models/volunteerApplication");
 const getVolunteerFormTemplateModel = require("../models/volunteerFormTemplate");
+const getVolunteerApplicationGroupModel = require("../models/volunteerApplicationGroup");
 const Volunteer = require("../models/volunteer");
 const resend = require("../utils/resendMailer");
 const { renderBrandedEmail, renderContactBlockText, escapeHtml } = require("../utils/emailTemplates");
@@ -194,40 +195,69 @@ exports.parsePagination = parsePagination;
    dizaines de candidatures. Un reviewer non-ADMIN/EDITOR ne voit que les
    candidatures des programmes qui lui sont rattachés (pas les candidatures
    spontanées, qui nécessitent ADMIN/EDITOR). */
+/* Construit la requête Mongo filtrée + scopée (programme/spontané, portée
+   réviseur, groupe, statut, recherche, filtres de champ) à partir de
+   req.query — partagée par listApplications et listApplicationEmails (même
+   filtre exact, juste une projection différente en sortie). Retourne soit
+   { query }, soit { error: { status, message } } (jamais les deux). */
+async function buildScopedApplicationsQuery(req) {
+  const { programId, status, search, dateFrom, dateTo, fieldFilters, groupId } = req.query;
+  const query = {};
+
+  if (programId === "spontaneous") {
+    query.programId = null;
+    if (req.user.role !== "ADMIN") {
+      return { error: { status: 403, message: "Non autorisé" } };
+    }
+  } else if (programId) {
+    const Program = getVolunteerProgramModel();
+    const program = await Program.findById(programId);
+    if (!program) return { error: { status: 404, message: "Programme introuvable" } };
+    if (!canReviewProgram(program, req.user)) {
+      return { error: { status: 403, message: "Vous n'êtes pas autorisé à consulter les candidatures de ce programme" } };
+    }
+    query.programId = programId;
+    const scope = getReviewerApplicationScope(program, req.user);
+    if (scope) query._id = { $in: scope };
+  } else if (req.user.role !== "ADMIN") {
+    return { error: { status: 403, message: "Non autorisé" } };
+  }
+
+  if (status) query.status = status;
+
+  // Filtre par groupe (onglet Candidatures, retour utilisateur 2026-11-25 :
+  // "faciliter le filtre des mails par groupe créé") — combiné par
+  // intersection avec une éventuelle restriction de portée réviseur
+  // (query._id posé juste au-dessus), jamais en l'écrasant.
+  if (groupId) {
+    const Group = getVolunteerApplicationGroupModel();
+    const group = await Group.findOne({ _id: groupId, programId });
+    if (!group) return { error: { status: 404, message: "Groupe introuvable" } };
+    const groupIds = group.applicationIds.map(String);
+    if (query._id) {
+      const allowed = new Set(query._id.$in.map(String));
+      query._id = { $in: groupIds.filter((id) => allowed.has(id)) };
+    } else {
+      query._id = { $in: groupIds };
+    }
+  }
+
+  let filterQuery;
+  try {
+    filterQuery = buildApplicationFilterQuery({ search, dateFrom, dateTo, fieldFilters });
+  } catch {
+    return { error: { status: 400, message: "fieldFilters invalide (JSON attendu)" } };
+  }
+  Object.assign(query, filterQuery);
+
+  return { query };
+}
+
 exports.listApplications = async (req, res, next) => {
   try {
     const Application = getVolunteerApplicationModel();
-    const { programId, status, search, dateFrom, dateTo, fieldFilters } = req.query;
-    const query = {};
-
-    if (programId === "spontaneous") {
-      query.programId = null;
-      if (req.user.role !== "ADMIN") {
-        return res.status(403).json({ message: "Non autorisé" });
-      }
-    } else if (programId) {
-      const Program = getVolunteerProgramModel();
-      const program = await Program.findById(programId);
-      if (!program) return res.status(404).json({ message: "Programme introuvable" });
-      if (!canReviewProgram(program, req.user)) {
-        return res.status(403).json({ message: "Vous n'êtes pas autorisé à consulter les candidatures de ce programme" });
-      }
-      query.programId = programId;
-      const scope = getReviewerApplicationScope(program, req.user);
-      if (scope) query._id = { $in: scope };
-    } else if (req.user.role !== "ADMIN") {
-      return res.status(403).json({ message: "Non autorisé" });
-    }
-
-    if (status) query.status = status;
-
-    let filterQuery;
-    try {
-      filterQuery = buildApplicationFilterQuery({ search, dateFrom, dateTo, fieldFilters });
-    } catch {
-      return res.status(400).json({ message: "fieldFilters invalide (JSON attendu)" });
-    }
-    Object.assign(query, filterQuery);
+    const { query, error } = await buildScopedApplicationsQuery(req);
+    if (error) return res.status(error.status).json({ message: error.message });
 
     const { page, limit } = parsePagination(req.query);
 
@@ -237,6 +267,30 @@ exports.listApplications = async (req, res, next) => {
     ]);
 
     res.json({ items, total, page, totalPages: Math.max(1, Math.ceil(total / limit)) });
+  } catch (error) {
+    next(error);
+  }
+};
+
+/* -------------------- Staff : emails des candidatures filtrées, pour copie en masse -------------------- */
+/* Retour utilisateur, 2026-11-25 : "filtrer uniquement les mails pour les
+   copier en gros... par groupe créé" — mêmes filtres exacts que
+   listApplications (programme/portée réviseur/groupe/statut/recherche),
+   mais SANS pagination (plafonné à 2000 pour rester raisonnable) et ne
+   renvoie que l'email, pas tout le document. */
+exports.listApplicationEmails = async (req, res, next) => {
+  try {
+    const Application = getVolunteerApplicationModel();
+    const { query, error } = await buildScopedApplicationsQuery(req);
+    if (error) return res.status(error.status).json({ message: error.message });
+
+    const items = await Application.find(query)
+      .select("applicantEmail")
+      .sort({ createdAt: -1 })
+      .limit(2000);
+
+    const emails = [...new Set(items.map((a) => a.applicantEmail).filter(Boolean))];
+    res.json({ emails, total: emails.length });
   } catch (error) {
     next(error);
   }
